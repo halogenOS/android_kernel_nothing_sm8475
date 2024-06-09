@@ -51,7 +51,6 @@ static DEFINE_MUTEX(wfs_lock);
 static DEFINE_MUTEX(fwnode_link_lock);
 static LIST_HEAD(deferred_sync);
 static unsigned int defer_sync_state_count = 1;
-static unsigned int defer_fw_devlink_count;
 static LIST_HEAD(deferred_fw_devlink);
 static DEFINE_MUTEX(defer_fw_devlink_lock);
 static struct workqueue_struct *device_link_wq;
