@@ -1727,7 +1727,9 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 				}
 			}
 
-			if (is_dim_valid)
+			cstate->fod_dim_valid = is_dim_valid;
+
+			if (cstate->fod_dim_valid)
 				_sde_crtc_setup_dim_layer_cfg(crtc, sde_crtc,
 						mixer, cstate->fod_dim_layer);
 		}
