@@ -16,4 +16,11 @@ config KSU_DEBUG
 	help
 	  Enable KernelSU debug mode.
 
+config KSU_VERSION
+	int "KernelSU version"
+	depends on KSU
+	default 16
+	help
+	  KSU version (10000 + git commits on KernelSU repo + 200)
+
 endmenu
