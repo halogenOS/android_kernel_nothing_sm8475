@@ -1038,7 +1038,8 @@ static bool sde_connector_is_fod_enabled(struct sde_connector *c_conn)
 	    !c_conn->encoder->crtc->state)
 		return false;
 
-	return !!to_sde_crtc_state(c_conn->encoder->crtc->state)->fod_dim_layer;
+	return (!!to_sde_crtc_state(c_conn->encoder->crtc->state)->fod_dim_layer &&
+		!!to_sde_crtc_state(c_conn->encoder->crtc->state)->fod_dim_valid);
 }
 
 static int _sde_connector_update_finger_hbm_status(
