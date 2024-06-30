@@ -1704,36 +1704,32 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 			for (i = 0; i < cstate->num_dim_layers; i++)
 				_sde_crtc_setup_dim_layer_cfg(crtc, sde_crtc,
 						mixer, &cstate->dim_layer[i]);
-			
-			if (cstate->fod_dim_layer) {
-				bool is_dim_valid = true;
-				uint32_t zpos_max = 0;
-				cstate->fod_dim_valid = false;
+			clear_bit(SDE_CRTC_DIRTY_DIM_LAYERS, cstate->dirty);
+		}
 
-				drm_atomic_crtc_for_each_plane(plane, crtc) {
-					state = plane->state;
-					if (!state)
-						continue;
-					pstate = to_sde_plane_state(state);
+		if (cstate->fod_dim_layer) {
+			bool is_dim_valid = true;
+			uint32_t zpos_max = 0;
 
-					if (zpos_max < pstate->stage)
-						zpos_max = pstate->stage;
+			drm_atomic_crtc_for_each_plane(plane, crtc) {
+				state = plane->state;
+				if (!state)
+					continue;
+				pstate = to_sde_plane_state(state);
 
-					if (pstate->stage == cstate->fod_dim_layer->stage) {
-						is_dim_valid = false;
-						SDE_ERROR("Skip fod_dim_layer as it shared plane stage %d %d\n",
-								pstate->stage, cstate->fod_dim_layer->stage);
-					}
-				}
+				if (zpos_max < pstate->stage)
+					zpos_max = pstate->stage;
 
-				if (is_dim_valid) {
-					_sde_crtc_setup_dim_layer_cfg(crtc, sde_crtc,
-							mixer, cstate->fod_dim_layer);
-					usleep_range(6 * 1000, 6 * 1000);
-					cstate->fod_dim_valid = true;
+				if (pstate->stage == cstate->fod_dim_layer->stage) {
+					is_dim_valid = false;
+					SDE_ERROR("Skip fod_dim_layer as it shared plane stage %d %d\n",
+							pstate->stage, cstate->fod_dim_layer->stage);
 				}
 			}
-			clear_bit(SDE_CRTC_DIRTY_DIM_LAYERS, cstate->dirty);
+
+			if (is_dim_valid)
+				_sde_crtc_setup_dim_layer_cfg(crtc, sde_crtc,
+						mixer, cstate->fod_dim_layer);
 		}
 	}
 }
@@ -4979,7 +4975,7 @@ sde_crtc_setup_fod_dim_layer(struct sde_crtc_state *cstate, uint32_t stage)
 	struct sde_hw_dim_layer *dim_layer = NULL;
 	struct dsi_display *display;
 	struct sde_kms *kms;
-	uint32_t alpha;
+	uint32_t alpha = 0;
 	uint32_t layer_stage;
 
 	kms = _sde_crtc_get_kms(crtc_state->crtc);
@@ -5007,7 +5003,8 @@ sde_crtc_setup_fod_dim_layer(struct sde_crtc_state *cstate, uint32_t stage)
 	}
 
 	mutex_lock(&display->panel->panel_lock);
-	alpha = display->panel->fod_dim_alpha;
+	if (!(display->panel->bl_config.real_bl_level >= display->panel->bl_config.bl_hbm_level))
+		alpha = display->panel->fod_dim_alpha;
 	mutex_unlock(&display->panel->panel_lock);
 
 	dim_layer = &cstate->dim_layer[cstate->num_dim_layers];
@@ -5074,10 +5071,8 @@ sde_crtc_fod_atomic_check(struct sde_crtc_state *cstate,
 	if (!!cstate->fod_dim_layer)
 		dsi_panel_set_nolp(display->panel);
 
-	if (!cstate->fod_dim_layer) {
-		cstate->fod_dim_valid = false;
+	if (fod_plane_idx < 0 || !cstate->fod_dim_layer)
 		return;
-	}
 
 	for (plane_idx = 0; plane_idx < cnt; plane_idx++)
 		if (pstates[plane_idx].stage >= dim_layer_stage)
