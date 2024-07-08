@@ -1709,7 +1709,6 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		}
 
 		if (cstate->fod_dim_layer) {
-			uint32_t zpos_max = 0;
 			cstate->fod_dim_valid = false;
 
                         if (cstate->color_invert_on && !skipped_pcc)
@@ -1719,10 +1718,8 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 				state = plane->state;
 				if (!state)
 					continue;
-				pstate = to_sde_plane_state(state);
 
-				if (zpos_max < pstate->stage)
-					zpos_max = pstate->stage;
+				pstate = to_sde_plane_state(state);
 
 				if (pstate->stage == cstate->fod_dim_layer->stage) {
 					SDE_ERROR("Skip fod_dim_layer as it shared plane stage %d %d\n",
@@ -1733,7 +1730,7 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 
 			_sde_crtc_setup_dim_layer_cfg(crtc, sde_crtc,
 			        mixer, cstate->fod_dim_layer);
-			usleep_range(52 * 100, 52 * 100);
+			usleep_range(5 * 1000, 5 * 1000);
 			cstate->fod_dim_valid = true;
 		}
 	}
@@ -5065,16 +5062,18 @@ sde_crtc_fod_atomic_check(struct sde_crtc_state *cstate,
 			fod_dim_layer = sde_crtc_setup_fod_dim_layer(cstate, dim_layer_stage);
 	}
 
+	if (test_bit(SDE_CRTC_DIRTY_DIM_LAYERS, cstate->dirty))
+	        cstate->fod_dim_valid = false;
+
 	if (fod_dim_layer == cstate->fod_dim_layer)
 		return;
 
 	cstate->fod_dim_layer = fod_dim_layer;
 
-	if (!!cstate->fod_dim_layer)
+	if (!!cstate->fod_dim_layer) {
 		dsi_panel_set_nolp(display->panel);
-	else if (!cstate->fod_dim_layer) {
+	} else if (!cstate->fod_dim_layer) {
 	        set_bit(SDE_CRTC_DIRTY_DIM_LAYERS, cstate->dirty);
-	        cstate->fod_dim_valid = false;
 		return;
 	}
 
