@@ -31,6 +31,7 @@
 #include <wlan_cp_stats_ucfg_api.h>
 #include "wlan_cp_stats_utils_api.h"
 #include <target_if_cp_stats.h>
+#include <wlan_twt_public_structs.h>
 
 QDF_STATUS
 wlan_cp_stats_psoc_obj_create_handler(struct wlan_objmgr_psoc *psoc, void *arg)
@@ -463,6 +464,7 @@ wlan_cp_stats_send_infra_cp_req(struct wlan_objmgr_psoc *psoc,
 	}
 	return tx_ops->send_req_infra_cp_stats(psoc, req);
 }
+#endif /* WLAN_SUPPORT_INFRA_CTRL_PATH_STATS */
 
 #if defined(WLAN_SUPPORT_TWT) && defined (WLAN_TWT_CONV_SUPPORTED)
 /**
@@ -488,7 +490,7 @@ wlan_cp_stats_twt_get_peer_session_param(struct peer_cp_stats *peer_cp_stat_prv,
 	if (!peer_cp_stat_prv || !params)
 		return qdf_status;
 
-	for (i = 0; i < TWT_PEER_MAX_SESSIONS; i++) {
+	for (i = 0; i < WLAN_MAX_TWT_SESSIONS_PER_PEER; i++) {
 		twt_params = &peer_cp_stat_prv->twt_param[i];
 		event_type = peer_cp_stat_prv->twt_param[i].event_type;
 
@@ -568,13 +570,13 @@ wlan_cp_stats_twt_get_all_peer_session_params(
 		}
 
 		if (opmode == QDF_STA_MODE &&
-		    num_twt_session >= TWT_PEER_MAX_SESSIONS) {
+		    num_twt_session >= WLAN_MAX_TWT_SESSIONS_PER_PEER) {
 			wlan_objmgr_peer_release_ref(peer, WLAN_CP_STATS_ID);
 			goto done;
 		}
 
 		if (opmode == QDF_SAP_MODE &&
-		    num_twt_session >= (sap_num_peer * TWT_PEER_MAX_SESSIONS)) {
+		    num_twt_session >= (sap_num_peer * WLAN_MAX_TWT_SESSIONS_PER_PEER)) {
 			wlan_objmgr_peer_release_ref(peer, WLAN_CP_STATS_ID);
 			goto done;
 		}
@@ -621,7 +623,7 @@ wlan_cp_stats_twt_get_peer_session_param_by_dlg_id(
 	if (!peer_cp_stats_priv || !dest_param)
 		return qdf_status;
 
-	for (i = 0; i < TWT_PEER_MAX_SESSIONS; i++) {
+	for (i = 0; i < WLAN_MAX_TWT_SESSIONS_PER_PEER; i++) {
 		event_type = peer_cp_stats_priv->twt_param[i].event_type;
 		src_param = &peer_cp_stats_priv->twt_param[i];
 		if (!event_type ||
@@ -635,7 +637,7 @@ wlan_cp_stats_twt_get_peer_session_param_by_dlg_id(
 				     sizeof(*src_param));
 			qdf_status = QDF_STATUS_SUCCESS;
 			*num_twt_session += 1;
-			if (*num_twt_session >= TWT_PEER_MAX_SESSIONS)
+			if (*num_twt_session >= WLAN_MAX_TWT_SESSIONS_PER_PEER)
 				break;
 		}
 	}
@@ -732,6 +734,5 @@ wlan_cp_stats_twt_get_peer_session_params(struct wlan_objmgr_psoc *psoc,
 								params);
 	return num_twt_session;
 }
-#endif
-#endif /* WLAN_SUPPORT_INFRA_CTRL_PATH_STATS */
+#endif /* WLAN_SUPPORT_TWT */
 
