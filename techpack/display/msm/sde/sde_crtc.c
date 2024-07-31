@@ -1709,10 +1709,10 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		}
 
 		if (cstate->fod_dim_layer) {
-			cstate->fod_dim_valid = false;
-
-                        if (cstate->color_invert_on && !skipped_pcc)
+                        if (cstate->color_invert_on && !skipped_pcc) {
+                                cstate->fod_dim_valid = false;
                                 return;
+                        }
 
 			drm_atomic_crtc_for_each_plane(plane, crtc) {
 				state = plane->state;
@@ -1724,13 +1724,13 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 				if (pstate->stage == cstate->fod_dim_layer->stage) {
 					SDE_ERROR("Skip fod_dim_layer as it shared plane stage %d %d\n",
 							pstate->stage, cstate->fod_dim_layer->stage);
-					return;
+                                        cstate->fod_dim_valid = false;
+                                        return;
 				}
 			}
 
 			_sde_crtc_setup_dim_layer_cfg(crtc, sde_crtc,
 			        mixer, cstate->fod_dim_layer);
-			cstate->fod_dim_valid = true;
 		}
 	}
 }
@@ -5083,6 +5083,7 @@ sde_crtc_fod_atomic_check(struct sde_crtc_state *cstate,
 
 	if (!!cstate->fod_dim_layer) {
 		dsi_panel_set_nolp(display->panel);
+		cstate->fod_dim_valid = true;
 	} else if (!cstate->fod_dim_layer) {
 	        set_bit(SDE_CRTC_DIRTY_DIM_LAYERS, cstate->dirty);
 	        if (test_bit(SDE_CRTC_DIRTY_DIM_LAYERS, cstate->dirty))
