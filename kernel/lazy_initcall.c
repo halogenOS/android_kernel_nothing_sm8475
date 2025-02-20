@@ -112,6 +112,8 @@ static const __initconst char * const blacklist[] = {
         "camcc_diwali",
         "videocc_diwali",
         "debugcc_diwali",
+        "haptic_hv",
+        "aw20036_led",
 
 	NULL
 };
