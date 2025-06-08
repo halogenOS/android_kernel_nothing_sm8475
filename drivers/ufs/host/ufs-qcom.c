@@ -95,6 +95,29 @@ enum {
 };
 
 static char android_boot_dev[ANDROID_BOOT_DEV_MAX];
+/* UFSHCD error handling flags */
+enum {
+        UFSHCD_HAGC_EH_IN_PROGRESS = (1 << 0),
+};
+
+/* UFSHCD UIC layer error flags */
+enum {
+        UFSHCD_UIC_DL_PA_INIT_ERROR = (1 << 0), /* Data link layer error */
+        UFSHCD_UIC_DL_NAC_RECEIVED_ERROR = (1 << 1), /* Data link layer error */
+        UFSHCD_UIC_DL_TCx_REPLAY_ERROR = (1 << 2), /* Data link layer error */
+        UFSHCD_UIC_NL_ERROR = (1 << 3), /* Network layer error */
+        UFSHCD_UIC_TL_ERROR = (1 << 4), /* Transport Layer error */
+        UFSHCD_UIC_DME_ERROR = (1 << 5), /* DME error */
+        UFSHCD_UIC_PA_GENERIC_ERROR = (1 << 6), /* Generic PA error */
+};
+
+#define ufshcd_set_hagc_eh_in_progress(h) \
+        ((h)->eh_flags |= UFSHCD_HAGC_EH_IN_PROGRESS)
+#define ufshcd_hagc_eh_in_progress(h) \
+        ((h)->eh_flags & UFSHCD_HAGC_EH_IN_PROGRESS)
+#define ufshcd_clear_hagc_eh_in_progress(h) \
+        ((h)->eh_flags &= ~UFSHCD_HAGC_EH_IN_PROGRESS)
+
 
 static DEFINE_PER_CPU(struct freq_qos_request, qos_min_req);
 
@@ -200,6 +223,7 @@ static void ufs_qcom_parse_lpm(struct ufs_qcom_host *host);
 static void ufs_qcom_parse_wb(struct ufs_qcom_host *host);
 static int ufs_qcom_set_dme_vs_core_clk_ctrl_max_freq_mode(struct ufs_hba *hba);
 static int ufs_qcom_init_sysfs(struct ufs_hba *hba);
+static int ufs_nt_init_sysfs(struct ufs_hba *hba);
 static int ufs_qcom_update_qos_constraints(struct qos_cpu_group *qcg,
 					   enum constraint type);
 static int ufs_qcom_unvote_qos_all(struct ufs_hba *hba);
@@ -461,6 +485,36 @@ static inline void cancel_dwork_unvote_cpufreq(struct ufs_hba *hba)
 			host->cpu_info[i].first_cpu);
 	}
 }
+
+#if defined(CONFIG_UFSFEATURE)
+static void ufs_vh_compl_command(void *data, struct ufs_hba *hba,
+			struct ufshcd_lrb *lrbp)
+{
+	struct ufsf_feature *ufsf = ufs_qcom_get_ufsf(hba);
+	struct scsi_cmnd *cmd = lrbp->cmd;
+
+	if (!cmd)
+		return;
+
+#if defined(CONFIG_UFSHID)
+	/* Check if it is the last request to be completed */
+	if (hba->outstanding_tasks ||
+	    !(hba->outstanding_reqs == (1 << lrbp->task_tag)))
+		return;
+
+	schedule_work(&ufsf->on_idle_work);
+#endif
+	;
+}
+
+static void ufs_vh_update_sdev(void *data, struct scsi_device *sdev)
+{
+	struct ufs_hba *hba = shost_priv(sdev->host);
+	struct ufsf_feature *ufsf = ufs_qcom_get_ufsf(hba);
+
+	ufsf_slave_configure(ufsf, sdev);
+}
+#endif
 
 static int ufs_qcom_get_pwr_dev_param(struct ufs_qcom_dev_params *qcom_param,
 				      struct ufs_pa_layer_attr *dev_max,
@@ -2545,6 +2599,10 @@ static int ufs_qcom_apply_dev_quirks(struct ufs_hba *hba)
 	if (hba->dev_info.wmanufacturerid == UFS_VENDOR_MICRON)
 		hba->dev_quirks |= UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM;
 
+	if (hba->dev_info.wmanufacturerid == UFS_VENDOR_SKHYNIX) {
+		ufs_nt_init_sysfs(hba);
+	}
+
 	return err;
 }
 
@@ -4202,12 +4260,19 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 	ufs_qcom_populate_cluster_info(hba);
 	ufs_qcom_qos_init(hba);
 	ufs_qcom_parse_irq_affinity(hba);
+
+	init_manual_gc(hba);
+
 	ufs_qcom_ber_mon_init(hba);
 	ufs_qcom_storage_boost_param_init(hba);
 	host->ufs_ipc_log_ctx = ipc_log_context_create(UFS_QCOM_MAX_LOG_SZ,
 							"ufs-qcom", 0);
 	if (!host->ufs_ipc_log_ctx)
 		dev_warn(dev, "IPC Log init - failed\n");
+
+#if defined(CONFIG_UFSFEATURE)
+	ufsf_set_init_state(hba);
+#endif
 
 	/* register minidump */
 	if (msm_minidump_enabled()) {
@@ -5246,6 +5311,10 @@ static int ufs_qcom_device_reset(struct ufs_hba *hba)
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	int ret = 0;
 
+#if defined(CONFIG_UFSFEATURE)
+	ufsf_reset_host(ufs_qcom_get_ufsf(hba));
+#endif
+
 	/* reset gpio is optional */
 	if (!host->device_reset)
 		return -EOPNOTSUPP;
@@ -5867,6 +5936,218 @@ static ssize_t irq_affinity_support_show(struct device *dev,
 
 static DEVICE_ATTR_RW(irq_affinity_support);
 
+/* for manual gc */
+static ssize_t manual_gc_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+
+	u32 status = MANUAL_GC_OFF;
+
+	if (host->manual_gc.state == MANUAL_GC_DISABLE)
+		return scnprintf(buf, PAGE_SIZE, "%s", "disabled\n");
+
+	if (host->manual_gc.hagc_support) {
+		int err;
+
+		if (!ufshcd_hagc_eh_in_progress(hba)) {
+			pm_runtime_get_sync(hba->dev);
+			err = ufshcd_query_attr_retry(hba,
+				UPIU_QUERY_OPCODE_READ_ATTR,
+				QUERY_ATTR_IDN_MANUAL_GC_STATUS, 0, 0, &status);
+			pm_runtime_put_sync(hba->dev);
+			host->manual_gc.hagc_support = err ? false: true;
+		}
+	}
+
+	if (!host->manual_gc.hagc_support)
+		return scnprintf(buf, PAGE_SIZE, "%s", "bkops\n");
+
+	dev_err(dev, "%s status=%d\n", __func__, status);
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+			status == MANUAL_GC_STATUS_CLEAN ? "GREEN" :
+			status == MANUAL_GC_STATUS_PAUSE ? "YELLOW" :
+			status == MANUAL_GC_STATUS_DIRTY ? "RED" :
+			status == MANUAL_GC_STATUS_MAX ? "UNKNOWN" : "UNKNOWN");
+}
+
+static int manual_gc_enable(struct ufs_hba *hba, u32 *value)
+{
+	int ret;
+
+	if (ufshcd_hagc_eh_in_progress(hba))
+		return -EBUSY;
+
+	dev_err(hba->dev, "%s value=%d\n", __func__, *value);
+	pm_runtime_get_sync(hba->dev);
+	ret = ufshcd_query_attr_retry(hba,
+				UPIU_QUERY_OPCODE_WRITE_ATTR,
+				QUERY_ATTR_IDN_MANUAL_GC_CONT, 0, 0,
+				value);
+	pm_runtime_put_sync(hba->dev);
+	dev_err(hba->dev, "%s ret=%d\n", __func__, ret);
+	return ret;
+}
+
+static ssize_t manual_gc_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+
+	u32 value;
+	int err = 0;
+
+	if (kstrtou32(buf, 0, &value))
+		return -EINVAL;
+
+	if (value >= MANUAL_GC_MAX)
+		return -EINVAL;
+
+	if (ufshcd_hagc_eh_in_progress(hba))
+		return -EBUSY;
+
+	if (value == MANUAL_GC_DISABLE || value == MANUAL_GC_ENABLE) {
+		host->manual_gc.state = value;
+		return count;
+	}
+	if (host->manual_gc.state == MANUAL_GC_DISABLE)
+		return count;
+
+	if (host->manual_gc.hagc_support)
+		host->manual_gc.hagc_support =
+			manual_gc_enable(hba, &value) ? false : true;
+
+	pm_runtime_get_sync(hba->dev);
+
+	if (!host->manual_gc.hagc_support) {
+		err = ufshcd_bkops_ctrl(hba, (value == MANUAL_GC_ON) ?
+					BKOPS_STATUS_NON_CRITICAL:
+					BKOPS_STATUS_CRITICAL);
+		if (!hba->auto_bkops_enabled)
+			err = -EAGAIN;
+	}
+
+	/* flush wb buffer */
+	if (hba->dev_info.wspecversion >= 0x0310) {
+		enum query_opcode opcode = (value == MANUAL_GC_ON) ?
+						UPIU_QUERY_OPCODE_SET_FLAG:
+						UPIU_QUERY_OPCODE_CLEAR_FLAG;
+		u8 index = ufshcd_wb_get_query_index(hba);
+
+		ufshcd_query_flag_retry(hba, opcode,
+				QUERY_FLAG_IDN_WB_BUFF_FLUSH_DURING_HIBERN8,
+				index, NULL);
+		ufshcd_query_flag_retry(hba, opcode,
+				QUERY_FLAG_IDN_WB_BUFF_FLUSH_EN, index, NULL);
+	}
+
+	if (err || hrtimer_active(&host->manual_gc.hrtimer)) {
+		pm_runtime_put_sync(hba->dev);
+		return count;
+	} else {
+		/* pm_runtime_put_sync in delay_ms */
+		hrtimer_start(&host->manual_gc.hrtimer,
+			ms_to_ktime(host->manual_gc.delay_ms),
+			HRTIMER_MODE_REL);
+	}
+	return count;
+}
+
+static DEVICE_ATTR_RW(manual_gc);
+
+static ssize_t manual_gc_hold_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+
+	return snprintf(buf, PAGE_SIZE, "%lu\n", host->manual_gc.delay_ms);
+}
+
+static ssize_t manual_gc_hold_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+
+	unsigned long value;
+
+	if (kstrtoul(buf, 0, &value))
+		return -EINVAL;
+
+	if (value < UFSHCD_MANUAL_GC_HOLD_HIBERN8_MIN ||
+		value > UFSHCD_MANUAL_GC_HOLD_HIBERN8_MAX) {
+		dev_err(dev, "%s Invaild value: %d\n", __func__, value);
+		return -EINVAL;
+	}
+	host->manual_gc.delay_ms = value;
+	return count;
+}
+
+static DEVICE_ATTR_RW(manual_gc_hold);
+
+static enum hrtimer_restart mgc_hrtimer_handler(struct hrtimer *timer)
+{
+	struct ufs_qcom_host *host = container_of(timer, struct ufs_qcom_host,
+					manual_gc.hrtimer);
+
+	queue_work(host->manual_gc.mgc_workq, &host->manual_gc.hibern8_work);
+	return HRTIMER_NORESTART;
+}
+
+static void mgc_hibern8_work(struct work_struct *work)
+{
+	struct ufs_qcom_host *host = container_of(work, struct ufs_qcom_host,
+					manual_gc.hibern8_work);
+	pm_runtime_put_sync(host->hba->dev);
+	/* bkops will be disabled when power down */
+}
+
+static struct attribute *ufs_nt_sysfs_attrs[] = {
+	&dev_attr_manual_gc.attr,
+	&dev_attr_manual_gc_hold.attr,
+	NULL
+};
+
+static const struct attribute_group ufs_nt_sysfs_group = {
+	.name = "nt",
+	.attrs = ufs_nt_sysfs_attrs,
+};
+
+static int ufs_nt_init_sysfs(struct ufs_hba *hba)
+{
+	int ret;
+
+	ret = sysfs_create_group(&hba->dev->kobj, &ufs_nt_sysfs_group);
+	if (ret)
+		dev_err(hba->dev, "%s: Failed to create manual_gc sysfs group (err = %d)\n",
+				__func__, ret);
+
+	return ret;
+}
+
+void init_manual_gc(struct ufs_hba *hba)
+{
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+	struct ufs_manual_gc *mgc = &host->manual_gc;
+	char wq_name[sizeof("ufs_mgc_hibern8_work")];
+
+	mgc->state = MANUAL_GC_ENABLE;
+	mgc->hagc_support = true;
+	mgc->delay_ms = UFSHCD_MANUAL_GC_HOLD_HIBERN8;
+
+	hrtimer_init(&mgc->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	mgc->hrtimer.function = mgc_hrtimer_handler;
+
+	INIT_WORK(&mgc->hibern8_work, mgc_hibern8_work);
+	snprintf(wq_name, ARRAY_SIZE(wq_name), "ufs_mgc_hibern8_work_%d",
+			hba->host->host_no);
+	host->manual_gc.mgc_workq = create_singlethread_workqueue(wq_name);
+}
+
 static ssize_t boost_min_threshold_store(struct device *dev,
 		struct device_attribute *attr,
 		const char *buf, size_t count)
@@ -6332,6 +6613,16 @@ static int ufs_crypto_probe_check(struct device *dev)
 }
 #endif
 
+#if defined(CONFIG_UFSFEATURE)
+static void ufs_samsung_register_hooks(void)
+{
+	register_trace_android_vh_ufs_compl_command(
+				ufs_vh_compl_command, NULL);
+	register_trace_android_vh_ufs_update_sdev(
+				ufs_vh_update_sdev, NULL);
+}
+#endif
+
 /**
  * ufs_qcom_probe - probe routine of the driver
  * @pdev: pointer to Platform device handle
@@ -6381,6 +6672,11 @@ static int ufs_qcom_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, err, "ufshcd_pltfrm_init() failed\n");
 
 	ufs_qcom_register_hooks();
+
+#if defined(CONFIG_UFSFEATURE)
+	/* Register hook for Samsung features */
+	ufs_samsung_register_hooks();
+#endif
 	return err;
 }
 
@@ -6406,6 +6702,10 @@ static int ufs_qcom_remove(struct platform_device *pdev)
 	hba =  platform_get_drvdata(pdev);
 	host = ufshcd_get_variant(hba);
 
+#if defined(CONFIG_UFSFEATURE)
+	ufsf_remove(ufs_qcom_get_ufsf(hba));
+#endif
+
 	if (host->ufs_qos) {
 		r = host->ufs_qos;
 		qcg = r->qcg;
@@ -6429,6 +6729,9 @@ static void ufs_qcom_shutdown(struct platform_device *pdev)
 {
 	struct ufs_hba *hba;
 	struct ufs_qcom_host *host;
+#if defined(CONFIG_UFSFEATURE)
+	struct ufsf_feature *ufsf;
+#endif
 
 	if (!is_bootdevice_ufs) {
 		dev_info(&pdev->dev, "UFS is not boot dev.\n");
@@ -6436,9 +6739,15 @@ static void ufs_qcom_shutdown(struct platform_device *pdev)
 	}
 
 	hba =  platform_get_drvdata(pdev);
+#if defined(CONFIG_UFSFEATURE)
+	ufsf = ufs_qcom_get_ufsf(hba);
+#endif
 	host = ufshcd_get_variant(hba);
 
 	ufs_qcom_log_str(host, "0xdead\n");
+#if defined(CONFIG_UFSFEATURE)
+	ufsf_suspend(ufsf);
+#endif
 	if (host->dbg_en)
 		trace_ufs_qcom_shutdown(dev_name(hba->dev));
 
