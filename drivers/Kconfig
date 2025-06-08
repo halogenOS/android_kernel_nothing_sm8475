@@ -243,4 +243,8 @@ source "drivers/hte/Kconfig"
 
 source "drivers/cdx/Kconfig"
 
+source "drivers/nothing_stability/Kconfig"
+
+source "drivers/nothing_thermal/Kconfig"
+
 endmenu

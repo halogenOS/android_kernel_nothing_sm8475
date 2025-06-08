@@ -604,4 +604,19 @@ source "drivers/misc/cardreader/Kconfig"
 source "drivers/misc/uacce/Kconfig"
 source "drivers/misc/pvpanic/Kconfig"
 source "drivers/misc/mchp_pci1xxxx/Kconfig"
+config NT2_HWID
+	tristate "NT2 Hardware ID Driver"
+	help
+	  NT2 Hardware ID Driver.
+
+config NT_SECURE_STATE
+	tristate "NT Secure State Driver"
+	help
+	  NT Secure State Driver.
+
+config NT_SLOT_STATE
+	tristate "NT SLOT State Driver"
+	help
+	  NT SLOT State Driver.
+
 endmenu
