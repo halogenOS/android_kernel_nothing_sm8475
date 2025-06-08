@@ -16,6 +16,7 @@
 #include <linux/soc/qcom/smem.h>
 #include <linux/soc/qcom/smem_state.h>
 #include <linux/remoteproc.h>
+#include <linux/slab.h>
 #include <linux/delay.h>
 #include <asm/timex.h>
 
@@ -39,6 +40,23 @@ static int q6v5_load_state_toggle(struct qcom_q6v5 *q6v5, bool enable)
 		dev_err(q6v5->dev, "failed to toggle load state\n");
 
 	return ret;
+}
+
+static struct platform_device *q6v5_pdev;
+
+static void q6v5_crash_uevent(struct qcom_q6v5 *q6v5, const char *reason)
+{
+	char *envp[3];
+	int ret;
+
+	envp[0] = kasprintf(GFP_KERNEL, "SUBSYS_NAME=%s", dev_name(q6v5->dev));
+	envp[1] = kasprintf(GFP_KERNEL, "CRASH_REASON=%s", reason);
+	envp[2] = NULL;
+	ret = kobject_uevent_env(&q6v5_pdev->dev.kobj, KOBJ_CHANGE, envp);
+	if (ret)
+		dev_err(q6v5->dev, "failed to send the crash uevent: %d\n", ret);
+	kfree(envp[0]);
+	kfree(envp[1]);
 }
 
 /**
@@ -141,6 +159,7 @@ static void qcom_q6v5_crash_handler_work(struct work_struct *work)
 static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 {
 	struct qcom_q6v5 *q6v5 = data;
+	const char *reason = "unknown";
 	size_t len;
 	char *msg;
 
@@ -157,10 +176,12 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 
 	q6v5->crash_seq = q6v5->seq;
 	msg = qcom_smem_get(QCOM_SMEM_HOST_ANY, q6v5->crash_reason, &len);
-	if (!IS_ERR(msg) && len > 0 && msg[0])
+	if (!IS_ERR(msg) && len > 0 && msg[0]) {
+		reason = msg;
 		dev_err(q6v5->dev, "watchdog received: %s\n", msg);
-	else
+	} else {
 		dev_err(q6v5->dev, "watchdog without message\n");
+	}
 
 	if (q6v5->crash_stack) {
 		msg = qcom_smem_get(q6v5->smem_host_id, q6v5->crash_stack, &len);
@@ -176,8 +197,10 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 
 	if (q6v5->rproc->recovery_disabled)
 		queue_work(system_unbound_wq, &q6v5->crash_handler);
-	else
+	else {
+		q6v5_crash_uevent(q6v5, reason);
 		rproc_report_crash(q6v5->rproc, RPROC_WATCHDOG);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -185,6 +208,7 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 {
 	struct qcom_q6v5 *q6v5 = data;
+	const char *reason = "unknown";
 	size_t len;
 	char *msg;
 
@@ -198,10 +222,12 @@ static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 
 	q6v5->crash_seq = q6v5->seq;
 	msg = qcom_smem_get(QCOM_SMEM_HOST_ANY, q6v5->crash_reason, &len);
-	if (!IS_ERR(msg) && len > 0 && msg[0])
+	if (!IS_ERR(msg) && len > 0 && msg[0]) {
+		reason = msg;
 		dev_err(q6v5->dev, "fatal error received: %s\n", msg);
-	else
+	} else {
 		dev_err(q6v5->dev, "fatal error without message\n");
+	}
 
 	if (q6v5->crash_stack) {
 		msg = qcom_smem_get(q6v5->smem_host_id, q6v5->crash_stack, &len);
@@ -218,8 +244,10 @@ static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 
 	if (q6v5->rproc->recovery_disabled)
 		queue_work(system_unbound_wq, &q6v5->crash_handler);
-	else
+	else {
+		q6v5_crash_uevent(q6v5, reason);
 		rproc_report_crash(q6v5->rproc, RPROC_FATAL_ERROR);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -460,6 +488,9 @@ int qcom_q6v5_init(struct qcom_q6v5 *q6v5, struct platform_device *pdev,
 	}
 
 	INIT_WORK(&q6v5->crash_handler, qcom_q6v5_crash_handler_work);
+
+	if (!q6v5_pdev)
+		q6v5_pdev = pdev;
 
 	return 0;
 }
