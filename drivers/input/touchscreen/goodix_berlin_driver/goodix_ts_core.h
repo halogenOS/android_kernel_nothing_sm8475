@@ -539,6 +539,7 @@ struct goodix_ts_core {
 #endif
 
         int single_tap_pressed;
+        int double_tap_pressed;
 };
 
 /* external module structures */

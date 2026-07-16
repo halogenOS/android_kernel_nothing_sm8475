@@ -1083,6 +1083,17 @@ static ssize_t single_tap_show(
     return snprintf(buf, PAGE_SIZE, "%u\n", single_tap_pressed);
 }
 
+static ssize_t double_tap_show(
+    struct device *dev, struct device_attribute *attr, char *buf)
+{
+    int double_tap_pressed = 0;
+    struct goodix_ts_core *ts_core = dev_get_drvdata(dev);
+
+    double_tap_pressed = ts_core->double_tap_pressed;
+
+    return snprintf(buf, PAGE_SIZE, "%u\n", double_tap_pressed);
+}
+
 static DEVICE_ATTR(driver_info, 0440,
 		driver_info_show, NULL);
 static DEVICE_ATTR(chip_info, 0440,
@@ -1117,6 +1128,8 @@ static DEVICE_ATTR(fp_state, S_IRUGO,
                    fp_state_show, NULL);
 static DEVICE_ATTR(single_tap, S_IRUGO,
                    single_tap_show, NULL);
+static DEVICE_ATTR(double_tap, S_IRUGO,
+                   double_tap_show, NULL);
 
 static struct attribute *sysfs_attrs[] = {
 	&dev_attr_driver_info.attr,
@@ -1136,6 +1149,7 @@ static struct attribute *sysfs_attrs[] = {
 	&dev_attr_pocket_mode.attr,
         &dev_attr_fp_state.attr,
         &dev_attr_single_tap.attr,
+        &dev_attr_double_tap.attr,
 	NULL,
 };
 
