@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 #include <linux/atomic.h>
 #include <linux/input/mt.h>
+#include <linux/ktime.h>
 #include "goodix_ts_core.h"
 
 
@@ -33,6 +34,15 @@
 #define GOODIX_GESTURE_SINGLE_TAP		0x4C
 #define GOODIX_GESTURE_FOD_DOWN			0x46
 #define GOODIX_GESTURE_FOD_UP			0x55
+
+/*
+ * The shipping firmware never reports GOODIX_GESTURE_DOUBLE_TAP, so double
+ * tap is synthesized from two firmware single tap events that land close
+ * together in time and space.
+ */
+#define GESTURE_DOUBLE_TAP_WINDOW_MS		500
+#define GESTURE_DOUBLE_TAP_MAX_DELTA_X		150
+#define GESTURE_DOUBLE_TAP_MAX_DELTA_Y		200
 
 /*
  * struct gesture_module - gesture module data
@@ -46,6 +56,9 @@ struct gesture_module {
 	atomic_t registered;
 	struct goodix_ts_core *ts_core;
 	struct goodix_ext_module module;
+	s64 last_tap_ms;
+	u16 last_tap_x;
+	u16 last_tap_y;
 };
 
 static struct gesture_module *gsx_gesture; /*allocated in gesture init module*/
@@ -91,6 +104,10 @@ static ssize_t gsx_double_type_store(struct goodix_ext_module *module,
 	} else
 		ts_err("invalid cmd[%d]", buf[0]);
 
+	if (atomic_read(&gsx->ts_core->suspended) &&
+	    gsx->ts_core->hw_ops->gesture(gsx->ts_core, 0))
+		ts_err("failed re_send gesture cmd");
+
 	return count;
 }
 
@@ -133,6 +150,10 @@ static ssize_t gsx_single_type_store(struct goodix_ext_module *module,
 		gsx->ts_core->gesture_type &= ~GESTURE_SINGLE_TAP;
 	} else
 		ts_err("invalid cmd[%d]", buf[0]);
+
+	if (atomic_read(&gsx->ts_core->suspended) &&
+	    gsx->ts_core->hw_ops->gesture(gsx->ts_core, 0))
+		ts_err("failed re_send gesture cmd");
 
 	return count;
 }
@@ -240,6 +261,32 @@ static int gsx_gesture_exit(struct goodix_ts_core *cd,
 	return 0;
 }
 
+static void gsx_gesture_pair_tap(struct gesture_module *gsx)
+{
+	struct goodix_ts_core *cd = gsx->ts_core;
+	s64 now_ms = ktime_to_ms(ktime_get_boottime());
+	int dx = (int)cd->gesture_x - gsx->last_tap_x;
+	int dy = (int)cd->gesture_y - gsx->last_tap_y;
+
+	ts_debug("pair tap: dt=%lldms dx=%d dy=%d",
+		 now_ms - gsx->last_tap_ms, dx, dy);
+
+	if (gsx->last_tap_ms &&
+	    now_ms - gsx->last_tap_ms <= GESTURE_DOUBLE_TAP_WINDOW_MS &&
+	    abs(dx) <= GESTURE_DOUBLE_TAP_MAX_DELTA_X &&
+	    abs(dy) <= GESTURE_DOUBLE_TAP_MAX_DELTA_Y) {
+		ts_info("get DOUBLE-TAP gesture");
+		cd->double_tap_pressed = 1;
+		sysfs_notify(&cd->pdev->dev.kobj, NULL, "double_tap");
+		gsx->last_tap_ms = 0;
+		return;
+	}
+
+	gsx->last_tap_ms = now_ms;
+	gsx->last_tap_x = cd->gesture_x;
+	gsx->last_tap_y = cd->gesture_y;
+}
+
 /**
  * gsx_gesture_ist - Gesture Irq handle
  * This functions is excuted when interrupt happended and
@@ -287,16 +334,18 @@ static int gsx_gesture_ist(struct goodix_ts_core *cd,
                         core->single_tap_pressed = 0;
                         sysfs_notify(&cd->pdev->dev.kobj, NULL, "single_tap");
 		}
+		if (cd->gesture_type & GESTURE_DOUBLE_TAP)
+			gsx_gesture_pair_tap(module->priv_data);
 		break;
 	case GOODIX_GESTURE_DOUBLE_TAP:
 		if (cd->gesture_type & GESTURE_DOUBLE_TAP) {
 			ts_info("get DOUBLE-TAP gesture");
-			input_report_key(cd->input_dev, KEY_WAKEUP, 1);
-			input_sync(cd->input_dev);
-			input_report_key(cd->input_dev, KEY_WAKEUP, 0);
-			input_sync(cd->input_dev);
+                        core->double_tap_pressed = 1;
+                        sysfs_notify(&cd->pdev->dev.kobj, NULL, "double_tap");
 		} else {
 			ts_debug("not enable DOUBLE-TAP");
+                        core->double_tap_pressed = 0;
+                        sysfs_notify(&cd->pdev->dev.kobj, NULL, "double_tap");
 		}
 		break;
 	case GOODIX_GESTURE_FOD_DOWN:
@@ -362,9 +411,12 @@ static int gsx_gesture_before_suspend(struct goodix_ts_core *cd,
 {
 	int ret;
 	const struct goodix_ts_hw_ops *hw_ops = cd->hw_ops;
+	struct gesture_module *gsx = module->priv_data;
 
 	if (cd->gesture_type == 0)
 		return EVT_CONTINUE;
+
+	gsx->last_tap_ms = 0;
 
 	ret = hw_ops->gesture(cd, 0);
 	if (ret)
