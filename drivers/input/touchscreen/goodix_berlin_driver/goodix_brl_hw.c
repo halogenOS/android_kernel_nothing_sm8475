@@ -276,7 +276,16 @@ int brl_resume(struct goodix_ts_core *cd)
 int brl_gesture(struct goodix_ts_core *cd, int gesture_type)
 {
 	struct goodix_ts_cmd cmd;
-	u32 type = ~(cd->gesture_type);
+	u32 enabled = cd->gesture_type;
+	u32 type;
+
+	/*
+	 * The firmware has no native double tap detection, double tap is
+	 * paired from single tap events in the gesture module.
+	 */
+	if (enabled & GESTURE_DOUBLE_TAP)
+		enabled |= GESTURE_SINGLE_TAP;
+	type = ~enabled;
 
 	if (cd->bus->ic_type == IC_TYPE_BERLIN_A)
 		cmd.cmd = GOODIX_GESTURE_CMD_BA;
