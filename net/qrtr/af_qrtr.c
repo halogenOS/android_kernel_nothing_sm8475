@@ -1471,10 +1471,6 @@ static void qrtr_port_remove(struct qrtr_sock *ipc)
 	xa_erase(&qrtr_ports, port);
 	spin_unlock_irqrestore(&qrtr_port_lock, flags);
 
-	/* Ensure that if qrtr_port_lookup() did enter the RCU read section we
-	 * wait for it to up increment the refcount */
-	synchronize_rcu();
-
 	__sock_put(&ipc->sk);
 }
 
