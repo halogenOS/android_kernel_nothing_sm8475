@@ -5543,7 +5543,6 @@ static void walt_init(struct work_struct *work)
 {
 	static atomic_t already_inited = ATOMIC_INIT(0);
 	struct root_domain *rd = cpu_rq(cpumask_first(cpu_active_mask))->rd;
-	int i;
 
 	might_sleep();
 
@@ -5590,11 +5589,19 @@ static void walt_init(struct work_struct *work)
 	walt_boost_init();
 	waltgov_register();
 
+#ifdef CONFIG_SCHED_DEBUG
+	/*
+	 * Without SCHED_DEBUG the feature bits are compile-time constants and
+	 * TTWU_QUEUE is turned off for us in features.h instead.
+	 */
+	int i;
+
 	i = match_string(sched_feat_names, __SCHED_FEAT_NR, "TTWU_QUEUE");
 	if (i >= 0) {
 		static_key_disable(&sched_feat_keys[i]);
 		sysctl_sched_features &= ~(1UL << i);
 	}
+#endif
 
 	topology_clear_scale_freq_source(SCALE_FREQ_SOURCE_ARCH, cpu_online_mask);
 }
