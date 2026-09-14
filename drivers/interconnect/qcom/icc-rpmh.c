@@ -568,7 +568,9 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
 			goto err_deregister_provider;
 	}
 
+#if IS_ENABLED(CONFIG_INTERCONNECT_QCOM_DEBUG)
 	qcom_icc_debug_register(provider);
+#endif
 
 	return 0;
 
@@ -585,7 +587,9 @@ int qcom_icc_rpmh_remove(struct platform_device *pdev)
 {
 	struct qcom_icc_provider *qp = platform_get_drvdata(pdev);
 
+#if IS_ENABLED(CONFIG_INTERCONNECT_QCOM_DEBUG)
 	qcom_icc_debug_unregister(&qp->provider);
+#endif
 	clk_bulk_put_all(qp->num_clks, qp->clks);
 
 	icc_provider_deregister(&qp->provider);
