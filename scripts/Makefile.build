@@ -55,6 +55,8 @@ ifneq ($(userprogs),)
 include $(srctree)/scripts/Makefile.userprogs
 endif
 
+include $(srctree)/scripts/Makefile.dtbo
+
 ifndef obj
 $(warning kbuild: Makefile.build is included improperly)
 endif

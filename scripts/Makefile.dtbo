@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Overlays declare the base device tree they apply to as
+#
+#	<overlay>.dtbo-base := <base>.dtb ...
+#
+# 6.6 builds a .dtbo on its own -- scripts/Makefile.lib has the rule -- but
+# nothing makes an overlay depend on its base, so the bases are never built.
+# That matters because the overlays are merged against them afterwards.
+
+__dtbo := $(sort $(dtbo-y))
+
+dtbo-base	:= $(sort $(foreach m,$(__dtbo),$($(m)-base)))
+dtbo		:= $(foreach m,$(__dtbo),$(if $($(m)-base),$(m)))
+
+__dtbo		:= $(addprefix $(obj)/,$(__dtbo))
+dtbo-base	:= $(addprefix $(obj)/,$(dtbo-base))
+dtbo		:= $(addprefix $(obj)/,$(dtbo))
+
+$(call multi_depend, $(dtbo), , -base)
+
+always-$(CONFIG_BUILD_ARM64_DT_OVERLAY) += $(dtbo) $(dtbo-base)
