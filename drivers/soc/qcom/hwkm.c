@@ -1382,7 +1382,7 @@ static int qcom_hwkm_evict_slot(unsigned int slot, bool double_key)
 	return qti_hwkm_handle_cmd(&cmd_clear, &rsp_clear);
 }
 
-static int qcom_hwkm_program_key_v1(const struct ice_mmio_data *mmio_data,
+static noinline int qcom_hwkm_program_key_v1(const struct ice_mmio_data *mmio_data,
 				     const struct blk_crypto_key *key, unsigned int slot,
 				     unsigned int data_unit_mask, int capid)
 {
@@ -1570,13 +1570,6 @@ int qcom_hwkm_derive_raw_secret_platform(
 {
 	int err_program = 0;
 	int err_clear = 0;
-	struct hwkm_cmd cmd_unwrap;
-	struct hwkm_cmd cmd_kdf;
-	struct hwkm_cmd cmd_read;
-	struct hwkm_rsp rsp_unwrap;
-	struct hwkm_rsp rsp_kdf;
-	struct hwkm_rsp rsp_read;
-
 	struct hwkm_key_policy policy_kdf = {
 		.security_lvl = SW_KEY,
 		.hw_destination = ICEMEM_SLAVE,
@@ -1620,6 +1613,10 @@ int qcom_hwkm_derive_raw_secret_platform(
 	}
 
 	/* Unwrap keyblob into a non ICE slot using TP key */
+	{
+	struct hwkm_cmd cmd_unwrap;
+	struct hwkm_rsp rsp_unwrap;
+
 	cmd_unwrap.op = KEY_UNWRAP_IMPORT;
 	cmd_unwrap.unwrap.dks = GP_KEYSLOT;
 	cmd_unwrap.unwrap.kwk = TPKEY_SLOT_ICEMEM_SLAVE;
@@ -1634,6 +1631,7 @@ int qcom_hwkm_derive_raw_secret_platform(
 		qti_hwkm_clocks(false);
 		return -EINVAL;
 	}
+	}
 
 	/* Failsafe, clear RAW_SECRET_KEYSLOT incase it is not empty */
 	err_clear = qcom_hwkm_evict_slot(RAW_SECRET_KEYSLOT, false);
@@ -1645,6 +1643,10 @@ int qcom_hwkm_derive_raw_secret_platform(
 	}
 
 	/* Derive a 512-bit key which will be the key to encrypt/decrypt data */
+	{
+	struct hwkm_cmd cmd_kdf;
+	struct hwkm_rsp rsp_kdf;
+
 	cmd_kdf.op = SYSTEM_KDF;
 	cmd_kdf.kdf.dks = RAW_SECRET_KEYSLOT;
 	cmd_kdf.kdf.kdk = GP_KEYSLOT;
@@ -1660,8 +1662,13 @@ int qcom_hwkm_derive_raw_secret_platform(
 					err_program, RAW_SECRET_KEYSLOT);
 		err_program = -EINVAL;
 	}
+	}
 
 	/* Read the KDF key for raw secret */
+	{
+	struct hwkm_cmd cmd_read;
+	struct hwkm_rsp rsp_read;
+
 	cmd_read.op = KEY_SLOT_RDWR;
 	cmd_read.rdwr.slot = RAW_SECRET_KEYSLOT;
 	cmd_read.rdwr.is_write = false;
@@ -1671,6 +1678,7 @@ int qcom_hwkm_derive_raw_secret_platform(
 		err_program = -EINVAL;
 	}
 	memcpy(secret, rsp_read.rdwr.key, rsp_read.rdwr.sz);
+	}
 
 	err_clear = qcom_hwkm_evict_slot(GP_KEYSLOT, false);
 	if (err_clear)
