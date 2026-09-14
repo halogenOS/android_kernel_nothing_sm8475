@@ -83,6 +83,13 @@ AW20036_CFG aw20036_cfg_array[] = {
 
 #define POWER_SAVE_MODE
 
+/*
+ * PAD13 drives the red recording indicator. Both bulk write paths skip it
+ * on purpose (0x00..0x0C and 0x0E..0x23), so it has no writer other than
+ * single_brightness and stays lit until something clears it explicitly.
+ */
+#define AW20036_RED_LED_PAD	0x0D
+
 static char hw_ver[4] = "DVT";
 static char dev_color[6] = "white";
 
@@ -520,6 +527,17 @@ static void aw20036_hw_reinit(struct aw20036 *aw20036)
 		atomic_set(&aw20036->hw_init, 0);
 		pr_info("%s: reinit hw\n", __func__);
 	}
+}
+
+static int aw20036_red_led_clear(struct aw20036 *aw20036)
+{
+	int ret;
+
+	ret = aw20036_reg_page_cfg(aw20036, AW20036_REG_PAGE2);
+	if (ret < 0)
+		return ret;
+
+	return aw20036_i2c_write(aw20036, AW20036_RED_LED_PAD, 0);
 }
 
 /******************************************************
@@ -1032,6 +1050,11 @@ static ssize_t aw20036_all_white_brightness_store(struct device *dev,
 	aw20036_i2c_write_block(aw20036, 0x00, 13, data_1); /*led(0-12)*/
 	aw20036_i2c_write_block(aw20036, 0x0E, 22, data_2); /*led(14-35)*/
 
+	/* Neither block covers PAD13, so an all-off here would leave the red
+	   indicator lit with nothing left to turn it off. */
+	if (val == 0)
+		aw20036_red_led_clear(aw20036);
+
 	return len;
 }
 
@@ -1483,6 +1506,8 @@ static ssize_t aw20036_factory_test_store(struct device *dev,
 				aw20036_i2c_write(aw20036, REG_PATE, 0x00); //set pattern disable
 				aw20036_i2c_write(aw20036, REG_PATGO, 0x00); //set run disable
 				aw20036_i2c_write_bits(aw20036, REG_GCCR, BIT_ALLON_MASK, BIT_GCR_ALLON_ENABLE);
+				/* the breath work enabled every LEDON bit including PAD13 */
+				aw20036_red_led_clear(aw20036);
 				pr_info("%s state:%d end\n", __func__, state);
 			}
 		}
