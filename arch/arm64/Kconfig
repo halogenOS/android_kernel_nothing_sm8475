@@ -2329,6 +2329,14 @@ config CMDLINE_FORCE
 
 endchoice
 
+config BUILD_ARM64_DT_OVERLAY
+	bool "enable DT overlay compilation support"
+	depends on OF
+	help
+	  This option enables support for DT overlay compilation.
+	  Enabling this option sets required flags to add DT
+	  overlay in the compilation.
+
 config EFI_STUB
 	bool
 
