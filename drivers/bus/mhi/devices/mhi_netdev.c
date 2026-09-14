@@ -709,8 +709,8 @@ static int mhi_netdev_enable_iface(struct mhi_netdev *mhi_netdev)
 		goto napi_alloc_fail;
 	}
 
-	netif_napi_add(mhi_netdev->ndev, mhi_netdev->napi,
-		       mhi_netdev_poll, MHI_NETDEV_NAPI_POLL_WEIGHT);
+	netif_napi_add_weight(mhi_netdev->ndev, mhi_netdev->napi,
+			      mhi_netdev_poll, MHI_NETDEV_NAPI_POLL_WEIGHT);
 
 	ret = register_netdev(mhi_netdev->ndev);
 	if (ret) {
@@ -908,6 +908,11 @@ static void mhi_netdev_create_debugfs_dir(void)
 	dentry = debugfs_create_dir(MHI_NETDEV_DRIVER_NAME, 0);
 }
 
+static void mhi_netdev_remove_debugfs_dir(void)
+{
+	debugfs_remove_recursive(dentry);
+}
+
 #else
 
 static void mhi_netdev_create_debugfs(struct mhi_netdev *mhi_netdev)
@@ -915,6 +920,10 @@ static void mhi_netdev_create_debugfs(struct mhi_netdev *mhi_netdev)
 }
 
 static void mhi_netdev_create_debugfs_dir(void)
+{
+}
+
+static void mhi_netdev_remove_debugfs_dir(void)
 {
 }
 
@@ -1171,7 +1180,7 @@ module_init(mhi_netdev_init);
 
 static void __exit mhi_netdev_exit(void)
 {
-	debugfs_remove_recursive(dentry);
+	mhi_netdev_remove_debugfs_dir();
 
 	mhi_driver_unregister(&mhi_netdev_driver);
 }

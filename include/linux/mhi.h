@@ -806,6 +806,13 @@ int mhi_prepare_for_transfer(struct mhi_device *mhi_dev);
 int mhi_prepare_for_transfer_autoqueue(struct mhi_device *mhi_dev);
 
 /**
+ * mhi_poll - Poll for any available data in DL direction
+ * @mhi_dev: Device associated with the channels
+ * @budget: # of events to process
+ */
+int mhi_poll(struct mhi_device *mhi_dev, u32 budget);
+
+/**
  * mhi_unprepare_from_transfer - Reset UL and DL channels for data transfer.
  *                               Issue the RESET channel command and let the
  *                               device clean-up the context so no incoming
