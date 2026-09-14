@@ -4753,6 +4753,12 @@ static struct platform_driver ep_pcie_driver = {
 	},
 };
 
+#ifndef MODULE
+/*
+ * early_param() expands to the four-argument __setup_param(), which only
+ * exists for built-in code; the MODULE stub takes three. Kernel command line
+ * parsing has finished long before a module loads anyway.
+ */
 static int __init ep_pcie_hot_reset(char *str)
 {
 	if (!strcmp(str, "disable_hot_reset"))
@@ -4779,6 +4785,7 @@ static int __init ep_pcie_l1_disable(char *str)
 	return 0;
 }
 early_param("ep_pcie_l1_cfg", ep_pcie_l1_disable);
+#endif /* !MODULE */
 
 static int __init ep_pcie_init(void)
 {
