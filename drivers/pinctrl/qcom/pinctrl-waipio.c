@@ -8,7 +8,6 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
-#include <trace/hooks/gpiolib.h>
 
 #include "pinctrl-msm.h"
 #include "pinctrl-waipio.h"
@@ -37,57 +36,46 @@ static const struct msm_pinctrl_soc_data waipio_vm_pinctrl = {
 	.ngpios = 211,
 };
 
-static void qcom_trace_gpio_read(void *unused,
-				 struct gpio_device *gdev,
-				 bool *block_gpio_read)
-{
-	*block_gpio_read = true;
-}
-
-static int qcom_msm_pinctrl_probe(struct platform_device *pdev)
+static int waipio_pinctrl_probe(struct platform_device *pdev)
 {
 	const struct msm_pinctrl_soc_data *pinctrl_data;
 	struct device *dev = &pdev->dev;
 
-	pinctrl_data = of_device_get_match_data(&pdev->dev);
+	pinctrl_data = of_device_get_match_data(dev);
 	if (!pinctrl_data)
 		return -EINVAL;
-
-	if (of_device_is_compatible(dev->of_node, "qcom,waipio-vm-pinctrl"))
-		register_trace_android_vh_gpio_block_read(qcom_trace_gpio_read,
-							  NULL);
 
 	return msm_pinctrl_probe(pdev, pinctrl_data);
 }
 
-static const struct of_device_id qcom_pinctrl_of_match[] = {
+static const struct of_device_id waipio_pinctrl_of_match[] = {
 	{ .compatible = "qcom,waipio-pinctrl", .data = &waipio_pinctrl},
 	{ .compatible = "qcom,waipio-vm-pinctrl", .data = &waipio_vm_pinctrl},
 	{ },
 };
 
-static struct platform_driver qcom_msm_pinctrl_driver = {
+static struct platform_driver waipio_pinctrl_driver = {
 	.driver = {
-		.name = "qcom_msm_pinctrl",
-		.of_match_table = qcom_pinctrl_of_match,
+		.name = "waipio-pinctrl",
+		.of_match_table = waipio_pinctrl_of_match,
 	},
-	.probe = qcom_msm_pinctrl_probe,
-	.remove = msm_pinctrl_remove,
+	.probe = waipio_pinctrl_probe,
+	.remove_new = msm_pinctrl_remove,
 };
 
-static int __init qcom_msm_pinctrl_init(void)
+static int __init waipio_pinctrl_init(void)
 {
-	return platform_driver_register(&qcom_msm_pinctrl_driver);
+	return platform_driver_register(&waipio_pinctrl_driver);
 }
-arch_initcall(qcom_msm_pinctrl_init);
+arch_initcall(waipio_pinctrl_init);
 
-static void __exit qcom_msm_pinctrl_exit(void)
+static void __exit waipio_pinctrl_exit(void)
 {
-	platform_driver_unregister(&qcom_msm_pinctrl_driver);
+	platform_driver_unregister(&waipio_pinctrl_driver);
 }
-module_exit(qcom_msm_pinctrl_exit);
+module_exit(waipio_pinctrl_exit);
 
-MODULE_DESCRIPTION("QTI pinctrl driver");
-MODULE_LICENSE("GPL v2");
-MODULE_DEVICE_TABLE(of, qcom_pinctrl_of_match);
+MODULE_DESCRIPTION("QTI waipio pinctrl driver");
+MODULE_LICENSE("GPL");
+MODULE_DEVICE_TABLE(of, waipio_pinctrl_of_match);
 MODULE_SOFTDEP("pre: qcom_tlmm_vm_irqchip");
