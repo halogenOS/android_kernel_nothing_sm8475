@@ -2568,7 +2568,7 @@ static struct platform_driver qnoc_driver = {
 	.driver = {
 		.name = "qnoc-waipio",
 		.of_match_table = qnoc_of_match,
-		.sync_state = qcom_icc_rpmh_sync_state,
+		.sync_state = icc_sync_state,
 	},
 };
 
@@ -2579,4 +2579,4 @@ static int __init qnoc_driver_init(void)
 core_initcall(qnoc_driver_init);
 
 MODULE_DESCRIPTION("Waipio NoC driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
