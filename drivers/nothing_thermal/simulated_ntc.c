@@ -37,20 +37,13 @@ static DEFINE_IDA(shell_temp_ida);
 static DEFINE_SPINLOCK(slntc_lock);
 static int shell_temp[SHELL_MAX];
 
-struct sl_thermal_trip {
-        int temperature;
-        int hysteresis;
-        enum thermal_trip_type type;
-};
-
-
 struct slntc_shell_temp {
 	struct thermal_zone_device *tzd;
 	int shell_id;
 
 	/* trip data */
 	int ntrips;
-	struct sl_thermal_trip *trips;
+	struct thermal_trip *trips;
 	int prev_low_trip;
 	int prev_high_trip;
 	int prev_temp;
@@ -78,32 +71,6 @@ static int slntc_get_shell_temp(struct thermal_zone_device *tz,
 	return 0;
 }
 
-static int slntc_get_trip_type(struct thermal_zone_device *tz, int trip,
-				    enum thermal_trip_type *type)
-{
-	struct slntc_shell_temp *hst = tz->devdata;
-
-	if (trip >= hst->ntrips || trip < 0)
-		return -EDOM;
-
-	*type = hst->trips[trip].type;
-
-	return 0;
-}
-
-static int slntc_get_trip_temp(struct thermal_zone_device *tz, int trip,
-				    int *temp)
-{
-	struct slntc_shell_temp *hst = tz->devdata;
-
-	if (trip >= hst->ntrips || trip < 0)
-		return -EDOM;
-
-	*temp = hst->trips[trip].temperature;
-
-	return 0;
-}
-
 static int slntc_set_trip_temp(struct thermal_zone_device *tz, int trip,
 				    int temp)
 {
@@ -117,20 +84,8 @@ static int slntc_set_trip_temp(struct thermal_zone_device *tz, int trip,
 	hst->trips[trip].temperature = temp;
 	spin_unlock_irqrestore(&hst->trips_lock, flags);
 
-	pr_info("trips[trip].temperature = %d", trip, temp);
+	pr_info("trips[%d].temperature = %d", trip, temp);
 
-	return 0;
-}
-
-static int slntc_get_trip_hyst(struct thermal_zone_device *tz, int trip,
-				    int *hyst)
-{
-	struct slntc_shell_temp *hst = tz->devdata;
-
-	if (trip >= hst->ntrips || trip < 0)
-		return -EDOM;
-
-	*hyst = hst->trips[trip].hysteresis;
 	return 0;
 }
 
@@ -147,17 +102,14 @@ static int slntc_set_trip_hyst(struct thermal_zone_device *tz, int trip,
 	hst->trips[trip].hysteresis = hyst;
 	spin_unlock_irqrestore(&hst->trips_lock, flags);
 
-	pr_info("trips[trip].hysteresis = %d", trip, hyst);
+	pr_info("trips[%d].hysteresis = %d", trip, hyst);
 
 	return 0;
 }
 
-struct thermal_zone_device_ops shell_thermal_zone_ops = {
+static struct thermal_zone_device_ops shell_thermal_zone_ops = {
 	.get_temp = slntc_get_shell_temp,
-	.get_trip_type = slntc_get_trip_type,
-	.get_trip_temp = slntc_get_trip_temp,
 	.set_trip_temp = slntc_set_trip_temp,
-	.get_trip_hyst = slntc_get_trip_hyst,
 	.set_trip_hyst = slntc_set_trip_hyst,
 };
 
@@ -224,8 +176,14 @@ static int slntc_shell_probe(struct platform_device *pdev)
 	for (i = 0; i < hst->ntrips; i++)
 		mask |= 1 << i;
 
-	tz_dev = thermal_zone_device_register(dev_node->name,
-			hst->ntrips, mask, hst, &shell_thermal_zone_ops, NULL, 0, 0);
+	hst->prev_high_trip = INT_MAX;
+	hst->prev_low_trip = -INT_MAX;
+	hst->prev_temp = 0;
+	spin_lock_init(&hst->trips_lock);
+
+	tz_dev = thermal_zone_device_register_with_trips(dev_node->name,
+			hst->trips, hst->ntrips, mask, hst,
+			&shell_thermal_zone_ops, NULL, 0, 0);
 	if (IS_ERR_OR_NULL(tz_dev)) {
 		pr_err("register thermal zone for shell failed\n");
 		ret = -ENODEV;
@@ -233,10 +191,6 @@ static int slntc_shell_probe(struct platform_device *pdev)
 	}
 	thermal_zone_device_enable(tz_dev);
 	hst->tzd = tz_dev;
-	hst->prev_high_trip = INT_MAX;
-	hst->prev_low_trip = -INT_MAX;
-	hst->prev_temp = 0;
-	spin_lock_init(&hst->trips_lock);
 
 	shell_list[hst->shell_id] = hst;
 

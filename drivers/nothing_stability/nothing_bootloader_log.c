@@ -83,7 +83,7 @@ static int bootloader_logger_probe(struct platform_device *pdev)
 		virt_addr = ioremap(phys_addr, mem_size);
 		bootloader_log_buf = kzalloc(mem_size, GFP_KERNEL);
 		if(!bootloader_log_buf) {
-			pr_err("[%s]: failed to alloc bootloader_log_buf\n");
+			pr_err("[%s]: failed to alloc bootloader_log_buf\n", __func__);
 			return -ENOMEM;
 		}
 		bootloader_log_buf_len = mem_size;

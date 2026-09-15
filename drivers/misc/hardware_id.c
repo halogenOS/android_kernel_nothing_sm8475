@@ -13,6 +13,7 @@
 #include <linux/jiffies.h>
 
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 
 #include <linux/types.h>
 #include <linux/proc_fs.h>
@@ -79,11 +80,9 @@ static int hwid_probe(struct platform_device *pdev)
 	struct pinctrl *hwid_pinctrl;
 	struct pinctrl_state *pinctrl_state;
 
-	enum of_gpio_flags flags ;
-
 	printk(KERN_EMERG "enter hwid_probe\n");
 
-	ver_id0 = of_get_named_gpio_flags(pdev->dev.of_node, "ver_id0", 0, &flags);
+	ver_id0 = of_get_named_gpio(pdev->dev.of_node, "ver_id0", 0);
 	if (gpio_is_valid(ver_id0)) {
            ret = gpio_request(ver_id0, "ver_id0");
            if (ret) {
@@ -97,7 +96,7 @@ static int hwid_probe(struct platform_device *pdev)
 	    printk(KERN_ERR"set ver_id0 failed\n");
 	}
 
-	ver_id1 = of_get_named_gpio_flags(pdev->dev.of_node, "ver_id1", 0, &flags);
+	ver_id1 = of_get_named_gpio(pdev->dev.of_node, "ver_id1", 0);
 	if (gpio_is_valid(ver_id1)) {
            ret = gpio_request(ver_id1, "ver_id1");
            if (ret) {

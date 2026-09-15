@@ -18,7 +18,7 @@ struct slot_info {
 
 static struct slot_info *slot;
 
-static ssize_t uim0_show(struct class *class, struct class_attribute *attr,
+static ssize_t uim0_show(const struct class *class, const struct class_attribute *attr,
                             char *buf)
 {
 	int value;
@@ -26,7 +26,7 @@ static ssize_t uim0_show(struct class *class, struct class_attribute *attr,
 	return sprintf(buf, "%d\n",value);
 }
 
-static ssize_t uim1_show(struct class *class, struct class_attribute *attr,
+static ssize_t uim1_show(const struct class *class, const struct class_attribute *attr,
                             char *buf)
 {
 	int value;
@@ -47,7 +47,6 @@ ATTRIBUTE_GROUPS(slot_class);
 
 static struct class slot_class = {
 	.name = CLASS_NAME,
-	.owner = THIS_MODULE,
 	.class_groups = slot_class_groups,
 };
 

@@ -138,11 +138,7 @@ static int dma_buf_show(const struct dma_buf *buf_obj, void *private)
 {
 	int ret;
 	struct dma_buf_attachment *attach_obj;
-	struct dma_resv *robj;
-	struct dma_resv_list *fobj;
-	struct dma_fence *fence;
-	unsigned seq;
-	int attach_count, shared_count, i;
+	int attach_count;
 	struct dma_buf_priv *buf = (struct dma_buf_priv *)private;
 	struct seq_file *s = buf->s;
 
@@ -161,34 +157,7 @@ static int dma_buf_show(const struct dma_buf *buf_obj, void *private)
 		   buf_obj->name ?: "");
 	spin_unlock((spinlock_t *)&buf_obj->name_lock);
 
-	robj = buf_obj->resv;
-	while (true) {
-		seq = read_seqcount_begin(&robj->seq);
-		rcu_read_lock();
-		fobj = rcu_dereference(robj->fence);
-		shared_count = fobj ? fobj->shared_count : 0;
-		fence = rcu_dereference(robj->fence_excl);
-		if (!read_seqcount_retry(&robj->seq, seq))
-			break;
-		rcu_read_unlock();
-	}
-
-	if (fence)
-		seq_printf(s, "\tExclusive fence: %s %s %ssignalled\n",
-			   fence->ops->get_driver_name(fence),
-			   fence->ops->get_timeline_name(fence),
-			   dma_fence_is_signaled(fence) ? "" : "un");
-	for (i = 0; i < shared_count; i++) {
-		fence = rcu_dereference(fobj->shared[i]);
-		if (!dma_fence_get_rcu(fence))
-			continue;
-		seq_printf(s, "\tShared fence: %s %s %ssignalled\n",
-			   fence->ops->get_driver_name(fence),
-			   fence->ops->get_timeline_name(fence),
-			   dma_fence_is_signaled(fence) ? "" : "un");
-		dma_fence_put(fence);
-	}
-	rcu_read_unlock();
+	dma_resv_describe(buf_obj->resv, s);
 
 	seq_puts(s, "\tAttached Devices:\n");
 	attach_count = 0;
@@ -222,16 +191,17 @@ static int show_all_dma_thread(struct seq_file *m, void *p)
 	seq_printf(m, "%-8s\t%-8s\t%-8s\t%-8s\texp_name\t%-8s\n",
 		   "size", "flags", "mode", "count", "ino");
 
-	get_each_dmabuf(dma_buf_show, &dma_buf_priv);
+	dma_buf_get_each(dma_buf_show, &dma_buf_priv);
 
 	seq_printf(m, "\nTotal %d objects, %zu bytes\n",
 		   dma_buf_priv.count, dma_buf_priv.size);
 	return 0;
 }
 
-static int proccmp(void *unused, struct list_head *a, struct list_head *b)
+static int proccmp(void *unused, const struct list_head *a,
+		   const struct list_head *b)
 {
-	struct dma_proc *a_proc, *b_proc;
+	const struct dma_proc *a_proc, *b_proc;
 	a_proc = list_entry(a, struct dma_proc, head);
 	b_proc = list_entry(b, struct dma_proc, head);
 	return b_proc->size - a_proc->size;
@@ -356,6 +326,8 @@ static int __init nt_meminfo_init(void)
 }
 device_initcall(nt_meminfo_init);
 
+MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS(MINIDUMP);
 MODULE_LICENSE("GPL v2");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("<BSP_CORE@nothing.tech>");

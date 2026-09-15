@@ -3,9 +3,8 @@
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
 #include <linux/module.h>
+#include <linux/panic_notifier.h>
 #include <linux/reboot.h>
-
-#include <soc/qcom/restart.h>
 
 #define MAX_SZ_DIAG_ERR_MSG 	200
 
@@ -79,7 +78,7 @@ static int nothing_restart_info_probe(struct platform_device *pdev)
 	} else {
 		restart_info = of_iomap(np, 0);
 		if(!restart_info) {
-			pr_err("%s: nothing restart_info not valid\n");
+			pr_err("%s: nothing restart_info not valid\n", __func__);
 			return 0;
 		} else {
 			ret = of_property_read_u32(np, "info_size", &nothing_rst_info_size);
