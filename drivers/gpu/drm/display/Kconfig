@@ -5,6 +5,20 @@ config DRM_DP_AUX_BUS
 	depends on DRM
 	depends on OF || COMPILE_TEST
 
+config DRM_DISPLAY_HELPER_OOT
+	tristate "DRM display helpers for out-of-tree drivers"
+	depends on DRM
+	select DRM_DISPLAY_HELPER
+	select DRM_DISPLAY_DP_HELPER
+	help
+	  DRM_DISPLAY_HELPER and DRM_DISPLAY_DP_HELPER carry no prompt and are
+	  only ever turned on by an in-tree driver selecting them. The Qualcomm
+	  display driver is built out of tree and so cannot, but msm_drm still
+	  needs the DisplayPort helpers -- drm_dp_dpcd_read(), drm_dp_aux_*()
+	  and the rest -- whenever CONFIG_DRM_MSM_DP is enabled for the target.
+
+	  Say M here to pull them in from the config instead.
+
 config DRM_DISPLAY_HELPER
 	tristate
 	depends on DRM
