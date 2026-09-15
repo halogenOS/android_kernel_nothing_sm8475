@@ -380,6 +380,12 @@ DTC_FLAGS += $(DTC_FLAGS_$(basetarget))
 # Set -@ if the target is a base DTB that overlay is applied onto
 DTC_FLAGS += $(if $(filter $(patsubst $(obj)/%,%,$@), $(base-dtb-y)), -@)
 
+# QTI's overlays get merged onto a base and then serve as the base for the
+# next one, so they have to carry __symbols__ as well: a label introduced by
+# one of them, say sde_dp from the display overlay, is otherwise unresolvable
+# for everything applied afterwards. 5.10 passed -@ for every dtb and dtbo.
+DTC_FLAGS += $(if $(filter %.dtbo,$@), -@)
+
 # Generate an assembly file to wrap the output of the device tree compiler
 quiet_cmd_wrap_S_dtb = WRAP    $@
       cmd_wrap_S_dtb = {								\

@@ -13,6 +13,11 @@ __dtbo := $(sort $(dtbo-y))
 dtbo-base	:= $(sort $(foreach m,$(__dtbo),$($(m)-base)))
 dtbo		:= $(foreach m,$(__dtbo),$(if $($(m)-base),$(m)))
 
+# scripts/Makefile.lib only hands dtc -@ for entries listed in base-dtb-y, and
+# a base compiled without it has no __symbols__ node, so fdtoverlay cannot
+# resolve anything against it and merging fails with FDT_ERR_NOTFOUND.
+base-dtb-y	+= $(dtbo-base)
+
 __dtbo		:= $(addprefix $(obj)/,$(__dtbo))
 dtbo-base	:= $(addprefix $(obj)/,$(dtbo-base))
 dtbo		:= $(addprefix $(obj)/,$(dtbo))
