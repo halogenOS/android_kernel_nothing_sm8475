@@ -1165,12 +1165,24 @@ PHONY += headers_install
 headers_install: headers
 	$(call cmd,headers_install)
 
+# QTI builds several drivers out of tree, and their UAPI headers have to be
+# installed next to the kernel's own or vendor code that includes them - say
+# <linux/msm_audio.h> - has nowhere to find them.  5.10 listed audio, display
+# and video here by hand and got the rest from techpack/, which 6.6 no longer
+# has; take whatever the module tree actually carries instead.
+ext-mod-dir := ../sm8475-modules/qcom/opensource
+ext-mod-dirs := $(patsubst $(srctree)/%/include/uapi,%,\
+		  $(wildcard $(srctree)/$(ext-mod-dir)/*/include/uapi))
+
 headers:
 ifeq ($(KBUILD_EXTMOD),)
 	$(if $(filter um, $(SRCARCH)), $(error Headers not exportable for UML))
 endif
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)include/uapi
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)arch/$(SRCARCH)/include/uapi
+	$(Q)for d in $(ext-mod-dirs); do \
+		$(MAKE) $(hdr-inst)=$$d/include/uapi; \
+	done
 
 # ---------------------------------------------------------------------------
 # Devicetree files
