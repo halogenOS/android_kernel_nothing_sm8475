@@ -1165,14 +1165,16 @@ PHONY += headers_install
 headers_install: headers
 	$(call cmd,headers_install)
 
-# QTI builds several drivers out of tree, and their UAPI headers have to be
-# installed next to the kernel's own or vendor code that includes them - say
-# <linux/msm_audio.h> - has nowhere to find them.  5.10 listed audio, display
-# and video here by hand and got the rest from techpack/, which 6.6 no longer
-# has; take whatever the module tree actually carries instead.
+# QTI builds several drivers out of tree, and 6.6 moved their UAPI headers out
+# of the kernel along with them: msm_audio.h, msm_kgsl.h, the qcedev/smcinvoke
+# set and spcom.h all used to live here. Install them next to the kernel's own
+# or vendor code including them has nowhere to look.
+# Not all of them keep include/uapi at the top: dataipa has it under
+# drivers/platform/msm, smmu-proxy under securemsm-kernel, and so on.
 ext-mod-dir := ../sm8475-modules/qcom/opensource
 ext-mod-dirs := $(patsubst $(srctree)/%/include/uapi,%,\
-		  $(wildcard $(srctree)/$(ext-mod-dir)/*/include/uapi))
+		  $(shell find $(srctree)/$(ext-mod-dir) -maxdepth 8 -type d \
+			    -path '*/include/uapi' 2>/dev/null))
 
 headers:
 ifeq ($(KBUILD_EXTMOD),)
@@ -1180,8 +1182,14 @@ ifeq ($(KBUILD_EXTMOD),)
 endif
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)include/uapi
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)arch/$(SRCARCH)/include/uapi
+	@# Blank out `unwanted': Makefile.headersinst always installs into
+	@# usr/include, and each pass deletes whatever it finds in the
+	@# directories it touches but does not itself provide. Several of these
+	@# modules share linux/ and misc/ with the kernel, so without this they
+	@# prune each other's headers and the kernel's too, leaving only
+	@# whichever ran last.
 	$(Q)for d in $(ext-mod-dirs); do \
-		$(MAKE) $(hdr-inst)=$$d/include/uapi; \
+		$(MAKE) $(hdr-inst)=$$d/include/uapi unwanted=; \
 	done
 
 # ---------------------------------------------------------------------------
