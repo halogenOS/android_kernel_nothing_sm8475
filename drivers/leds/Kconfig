@@ -953,6 +953,14 @@ config LEDS_QPNP_VIBRATOR_LDO
 
 source "drivers/leds/blink/Kconfig"
 
+config LEDS_AW20036
+	tristate "LED Support for AW20036"
+	depends on LEDS_CLASS && I2C
+	help
+		this option enables support for the AW21036RGB LED connected
+		through I2C. Say Y to enable support for the AW21036LED
+		light automatically.
+
 comment "Flash and Torch LED drivers"
 source "drivers/leds/flash/Kconfig"
 
