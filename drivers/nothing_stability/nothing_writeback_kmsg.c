@@ -14,6 +14,7 @@
 #include <linux/buffer_head.h>
 #include <linux/bio.h>
 #include <linux/blkdev.h>
+#include <linux/device.h>
 #include <linux/kmsg_dump.h>
 #include <linux/mount.h>
 #include <linux/kdev_t.h>
@@ -114,11 +115,21 @@ pr_err("[NT_reserve_kernel_log] "fmt, ##arg)
 #define NT_MAGIC_SIZE 16 // need follow 2^n
 
 const char* NT_LOG_MAGIC = "NOTING_RKL_V0";
-#define NT_KMSG_PARTITION_LABEL "PARTLABEL=nt_kmsg"
-#define NT_UEFI_PARTITION_LABEL "PARTLABEL=nt_uefi"
-#define LOGDUMP_PARTITION_LABEL "PARTLABEL=logdump"
+#define NT_KMSG_PARTITION_LABEL "nt_kmsg"
+#define NT_UEFI_PARTITION_LABEL "nt_uefi"
+#define LOGDUMP_PARTITION_LABEL "logdump"
 
-const struct file_operations f_op = {.fsync = blkdev_fsync};
+/* blkdev_fsync is private to the block layer, so the flush that the write path
+ * needs is issued against the backing device directly. */
+static int nt_partition_fsync(struct file *file, loff_t start, loff_t end,
+			      int datasync)
+{
+	return sync_blockdev(I_BDEV(file->f_inode));
+}
+
+static const struct file_operations nt_partition_f_op = {
+	.fsync = nt_partition_fsync,
+};
 
 /* If someone needs to modify the NT_reserve_kernel_log_header struct.
  * you also need to change the NT_LOG_MAGIC!
@@ -214,9 +225,9 @@ int __write_buf_to_target_partition(struct file *target_partition_file, void *he
 
 	ret = generic_write_checks(&kiocb, &iter);
 	if (ret > 0)
-		ret = generic_perform_write(target_partition_file, &iter, kiocb.ki_pos);
+		ret = generic_perform_write(&kiocb, &iter);
 	if (ret > 0) {
-		target_partition_file->f_op = &f_op;
+		target_partition_file->f_op = &nt_partition_f_op;
 		kiocb.ki_pos += ret;
 		ret = generic_write_sync(&kiocb, ret);
 		if (ret < 0) {
@@ -227,29 +238,55 @@ int __write_buf_to_target_partition(struct file *target_partition_file, void *he
 	return 0;
 }
 
+static int nt_match_dev_by_label(struct device *dev, const void *data)
+{
+	struct block_device *bdev = dev_to_bdev(dev);
+	const char *label = data;
+
+	return bdev->bd_meta_info && !strcmp(label, bdev->bd_meta_info->volname);
+}
+
+/* The PARTLABEL= lookup lives in __init text now (early_lookup_bdev), which
+ * this driver cannot call: the partition is resolved from a kthread that may
+ * still be retrying after free_initmem(). Matching the label against the block
+ * layer's own partition metadata keeps the lookup in ordinary text. */
+static int nt_devt_from_partlabel(const char *label, dev_t *devt)
+{
+	struct device *dev;
+
+	dev = class_find_device(&block_class, NULL, label, nt_match_dev_by_label);
+	if (!dev)
+		return -ENODEV;
+
+	*devt = dev->devt;
+	put_device(dev);
+	return 0;
+}
+
 struct block_device *get_target_partition_block_device(char* partition_label)
 {
 	struct block_device *bdev = NULL;
 	int retry_wait_for_device = RETRY_COUNT_FOR_GET_DEV_T;
 	dev_t devt;
 
-
 	while (retry_wait_for_device > 0){
-		devt = name_to_dev_t(partition_label);
-		bdev = blkdev_get_by_dev(devt, FMODE_READ | FMODE_WRITE, NULL);
+		if (!nt_devt_from_partlabel(partition_label, &devt)) {
+			bdev = blkdev_get_by_dev(devt, BLK_OPEN_READ | BLK_OPEN_WRITE,
+						 NULL, NULL);
 			if (!IS_ERR(bdev)) {
-				NT_rkl_err_print("Get partition: %s\n", (char *)bdev->bd_part->info->volname, devt);
+				NT_rkl_info_print("Get partition: %s (%u:%u)\n"
+					, partition_label, MAJOR(devt), MINOR(devt));
 				return bdev;
-			} else {
-				NT_rkl_err_print("Get partition failed, retry count %d\n", retry_wait_for_device);
-				msleep_interruptible(PER_LOOP_MS);
 			}
+		}
+		NT_rkl_err_print("Get partition failed, retry count %d\n", retry_wait_for_device);
+		msleep_interruptible(PER_LOOP_MS);
 		--retry_wait_for_device;
 		}
 	return NULL;
 }
 
-static int bootloader_count_init_from_nt_uefi() {
+static int bootloader_count_init_from_nt_uefi(void) {
 	struct block_device *bdev = NULL;
 	struct file target_partition_file;
 
@@ -265,7 +302,7 @@ static int bootloader_count_init_from_nt_uefi() {
 
 	if(__read_buf_from_target_partition(&target_partition_file, &nt_uefi_header
 		, sizeof(NT_reserve_log_header), NT_RESERVE_N_HEADER_OFFSET)) {
-		NT_rkl_err_print("%s: Error getting header from nt_uefi\n");
+		NT_rkl_err_print("%s: Error getting header from nt_uefi\n", __func__);
 		nt_uefi_header.bootloader_count = 0;
 		return 1;
 	}
@@ -350,7 +387,7 @@ void write_back_kernel_boot_log(struct file *target_partition_file) {
 	char* buf = NULL;
 	char *line_buf = NULL;
 	char prefix_buf[PREFIX_BUFFER_SIZE] = {0};
-	struct kmsg_dumper kmsg_dumper;
+	struct kmsg_dump_iter kmsg_iter;
 	unsigned int offset = 0;
 	unsigned int ori_offset = 0;
 	int delta_4K_offset = 0;
@@ -386,10 +423,15 @@ void write_back_kernel_boot_log(struct file *target_partition_file) {
 		strncpy(buf, prefix_buf, PREFIX_BUFFER_SIZE);
 	}
 	now_len = strlen(buf);
-	kmsg_dumper.active = true;
+
+	/* Iteration state moved out of the dumper into its own object; rewinding
+	 * once here is what 'active = true' used to stand for. The re-loop below
+	 * deliberately does not rewind, so each pass picks up only what was
+	 * logged since the last one. */
+	kmsg_dump_rewind(&kmsg_iter);
 
 	RE_LOOP:
-	while (kmsg_dump_get_line(&kmsg_dumper, true, line_buf, BOOT_LOG_SIZE_OF_LINE, &len)){
+	while (kmsg_dump_get_line(&kmsg_iter, true, line_buf, BOOT_LOG_SIZE_OF_LINE, &len)){
 		delta_4K_offset = now_len + len - (NT_PAGE_SIZE );
 		if (delta_4K_offset > 0) {
 			memcpy(buf + now_len, line_buf, len - delta_4K_offset);
@@ -475,7 +517,7 @@ int create_NT_device(void) {
 
 	nt_sys_device_devt = MKDEV(NT_MAJOR, NT_MINOR);
 
-	nt_sys_dev_class = class_create(THIS_MODULE,"NT");
+	nt_sys_dev_class = class_create("NT");
 	if (IS_ERR_OR_NULL(nt_sys_dev_class)) {
 		NT_rkl_err_print("sysfs device class creation failed\n");
 		goto out;
