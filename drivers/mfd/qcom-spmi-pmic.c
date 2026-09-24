@@ -283,8 +283,16 @@ static int pmic_spmi_probe(struct spmi_device *sdev)
 	/* Only the first slave id for a PMIC contains this information */
 	if (sdev->usid % ctx->num_usids == 0) {
 		ret = pmic_spmi_load_revid(regmap, &sdev->dev, &ctx->pmic);
+		/*
+		 * Losing the revid is not worth losing the PMIC over. pmr735b@5
+		 * on this board never answers it -- the arbiter denies the read,
+		 * and 5.10 merely logged that and carried on. Returning here
+		 * takes the PMIC and every child node with it, which costs the
+		 * rails that dispcc and everything behind it depend on.
+		 */
 		if (ret < 0)
-			return ret;
+			dev_warn(&sdev->dev,
+				 "no revid (%d), continuing without it\n", ret);
 	} else {
 		ret = pmic_spmi_get_base_revid(sdev, ctx);
 		if (ret)
