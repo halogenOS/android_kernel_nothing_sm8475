@@ -26,6 +26,9 @@
 
 #define QCOM_DUMMY_VAL	-1
 
+/* Used when a TBU node carries no qcom,iova-width, as 5.10 did. */
+#define QCOM_IOVA_WIDTH_DEFAULT		36
+
 #define IMPL_DEF4_MICRO_MMU_CTRL	0
 #define IMPL_DEF4_CLK_ON_STATUS		0x50
 #define IMPL_DEF4_CLK_ON_CLIENT_STATUS	0x54
@@ -1997,9 +2000,16 @@ static int qsmmuv500_tbu_probe(struct platform_device *pdev)
 	tbu->sid_start = of_read_number(cell, 1);
 	tbu->num_sids = of_read_number(cell + 1, 1);
 
+	/*
+	 * 6.6 turned this into a mandatory property; 5.10 fell back to
+	 * QCOM_IOVA_WIDTH_DEFAULT when it was absent. waipio's SMMU device tree
+	 * relies on that fallback and declares it on none of its fourteen TBUs, so
+	 * requiring it fails every one of them with -EINVAL and takes QSMMUV500
+	 * down with them.
+	 */
 	ret = of_property_read_u32(dev->of_node, "qcom,iova-width", &tbu->iova_width);
 	if (ret < 0)
-		return ret;
+		tbu->iova_width = QCOM_IOVA_WIDTH_DEFAULT;
 
 	dev_set_drvdata(dev, tbu);
 	return 0;
