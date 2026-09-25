@@ -377,20 +377,21 @@ int action_reserve_kernel_log_header(struct file *target_partition_file, int act
 		return 1;
 }
 
+/*
+ * Zero the whole slot before a boot reuses it. This used to step through the
+ * slot by BOOT_LOG_PAGES bytes instead of a page, clearing only its first
+ * ~260 KB, so a shorter new log ran straight into the text of the boot that
+ * had used the slot sixteen boots earlier.
+ */
 int clear_kernel_boot_log(struct file *target_partition_file, int offset) {
-	int i = 0;
 	char* buf = NULL;
 
-	buf = (char*)vzalloc(NT_PAGE_SIZE * sizeof(char));
+	buf = (char*)vzalloc(BOOT_LOG_SIZE);
 	if(!buf) {
 		NT_rkl_err_print("Failed to allocate boot log buffer!\n");
 		goto out;
 	}
-	for(i = 0; i < BOOT_LOG_PAGES; i++) {
-		if( __write_buf_to_target_partition(target_partition_file, buf, NT_PAGE_SIZE, offset+(i * BOOT_LOG_PAGES))){
-			goto out;
-		}
-	}
+	__write_buf_to_target_partition(target_partition_file, buf, BOOT_LOG_SIZE, offset);
 
 out:
 	if(buf) {
