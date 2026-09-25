@@ -1444,6 +1444,22 @@ static int ufs_qcom_set_dme_vs_core_clk_ctrl_max_freq_mode(struct ufs_hba *hba)
 	case 100000000:
 		err = ufs_qcom_set_dme_vs_core_clk_ctrl_clear_div(hba, 100, 4, true);
 		break;
+	/*
+	 * waipio/cape-era clock plans, dropped from the 6.6 driver. Values and
+	 * the cleared CORE_CLK_DIV_EN are exactly what the 5.10 driver programmed.
+	 */
+	case 850000000:
+		err = ufs_qcom_set_dme_vs_core_clk_ctrl_clear_div(hba, 213, 9, false);
+		break;
+	case 806400000:
+		err = ufs_qcom_set_dme_vs_core_clk_ctrl_clear_div(hba, 202, 9, false);
+		break;
+	case 600000000:
+		err = ufs_qcom_set_dme_vs_core_clk_ctrl_clear_div(hba, 300, 12, false);
+		break;
+	case 550000000:
+		err = ufs_qcom_set_dme_vs_core_clk_ctrl_clear_div(hba, 275, 11, false);
+		break;
 	default:
 		err = -EINVAL;
 		break;
