@@ -495,11 +495,28 @@ static int __init gh_irq_lend_init(void)
 	if (ret)
 		return ret;
 
-	ret = gh_register_vm_notifier(&gh_irq_vm_nb);
-	if (ret)
-		return ret;
+	/*
+	 * VM lifecycle events come from the secure VM loader; without it there
+	 * are no such VMs to follow, and the stub would fail every load.
+	 */
+	if (IS_ENABLED(CONFIG_GH_SECURE_VM_LOADER)) {
+		ret = gh_register_vm_notifier(&gh_irq_vm_nb);
+		if (ret)
+			goto unregister_lent;
+	}
 
-	return gh_rm_register_notifier(&gh_irq_released_accepted_nb);
+	ret = gh_rm_register_notifier(&gh_irq_released_accepted_nb);
+	if (ret)
+		goto unregister_vm;
+
+	return 0;
+
+unregister_vm:
+	if (IS_ENABLED(CONFIG_GH_SECURE_VM_LOADER))
+		gh_unregister_vm_notifier(&gh_irq_vm_nb);
+unregister_lent:
+	gh_rm_unregister_notifier(&gh_irq_lent_nb);
+	return ret;
 }
 module_init(gh_irq_lend_init);
 
@@ -507,7 +524,8 @@ static void gh_irq_lend_exit(void)
 {
 	gh_rm_unregister_notifier(&gh_irq_lent_nb);
 	gh_rm_unregister_notifier(&gh_irq_released_accepted_nb);
-	gh_unregister_vm_notifier(&gh_irq_vm_nb);
+	if (IS_ENABLED(CONFIG_GH_SECURE_VM_LOADER))
+		gh_unregister_vm_notifier(&gh_irq_vm_nb);
 }
 module_exit(gh_irq_lend_exit);
 
