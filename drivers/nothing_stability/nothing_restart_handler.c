@@ -13,22 +13,22 @@ struct nothing_restart_notify {
 	struct notifier_block reboot_nb;
 };
 
-struct nothing_restart_info {
-	char msg;
-};
-
-static struct nothing_restart_info *restart_info;
+static void __iomem *restart_info;
 static unsigned rst_msg_size;
 
-static inline void set_restart_msg(const char *msg)
+/*
+ * The IMEM slot is device memory of info_size bytes: compose the message in a
+ * NUL-padded buffer and copy it out whole instead of string-copying into it.
+ */
+static void set_restart_msg(const char *msg)
 {
+	char buf[MAX_SZ_DIAG_ERR_MSG] = {};
+
 	if (msg) {
 		pr_info("%s: %s \n", __func__, msg);
-		strncpy(&restart_info->msg, msg, rst_msg_size - 1);
+		strscpy(buf, msg, rst_msg_size);
 	}
-	else {
-		strncpy(&restart_info->msg, "", rst_msg_size - 1);
-	}
+	memcpy_toio(restart_info, buf, rst_msg_size);
 	mb();
 }
 
@@ -46,7 +46,7 @@ static int nothing_notifier_panic(struct notifier_block *this, unsigned long eve
 static int nothing_notifier_reboot(struct notifier_block *this, unsigned long event,
 			      void *ptr)
 {
-	char reboot_msg[MAX_SZ_DIAG_ERR_MSG];
+	char reboot_msg[MAX_SZ_DIAG_ERR_MSG] = "Reboot";
 	pr_warn("%s: Get reboot notify", __func__);
 	if (ptr)
 		snprintf(reboot_msg, rst_msg_size - 1, "Reboot: %s", (char *)ptr);
@@ -89,7 +89,11 @@ static int nothing_restart_info_probe(struct platform_device *pdev)
 				}
 		}
 	}
-	rst_msg_size = nothing_rst_info_size - offsetof(struct nothing_restart_info, msg);
+	rst_msg_size = nothing_rst_info_size;
+	if (!rst_msg_size) {
+		pr_err("%s: nothing restart info has no room for a message\n", __func__);
+		return 0;
+	}
 	if (rst_msg_size > MAX_SZ_DIAG_ERR_MSG)
 		rst_msg_size = MAX_SZ_DIAG_ERR_MSG;
 
