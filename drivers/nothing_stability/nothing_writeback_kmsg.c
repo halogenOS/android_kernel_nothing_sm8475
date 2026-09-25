@@ -124,12 +124,20 @@ const char* NT_LOG_MAGIC = "NOTING_RKL_V0";
 #define NT_UEFI_PARTITION_LABEL "nt_uefi"
 #define LOGDUMP_PARTITION_LABEL "logdump"
 
-/* blkdev_fsync is private to the block layer, so the flush that the write path
- * needs is issued against the backing device directly. */
+/* blkdev_fsync is private to the block layer, so what it does is done here
+ * against the backing device directly: write back the page cache, then flush
+ * the device's volatile cache -- a crash is usually followed by a reset that
+ * cuts UFS power, and anything still in that cache is gone with it. */
 static int nt_partition_fsync(struct file *file, loff_t start, loff_t end,
 			      int datasync)
 {
-	return sync_blockdev(I_BDEV(file->f_inode));
+	struct block_device *bdev = I_BDEV(file->f_inode);
+	int ret;
+
+	ret = sync_blockdev(bdev);
+	if (ret)
+		return ret;
+	return blkdev_issue_flush(bdev);
 }
 
 static const struct file_operations nt_partition_f_op = {
