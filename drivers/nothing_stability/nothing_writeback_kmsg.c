@@ -199,6 +199,9 @@ void __open_target_partition(struct block_device *bdev, struct file *target_part
 	target_partition_file->f_flags = O_DSYNC | __O_SYNC | O_NOATIME;
 	target_partition_file->f_inode = bdev->bd_inode;
 	target_partition_file->f_lock = bdev->bd_inode->i_lock;
+	/* 6.6 takes the kiocb flags from here, and only open() fills it in:
+	 * without it O_DSYNC never reaches generic_write_sync(). */
+	target_partition_file->f_iocb_flags = iocb_flags(target_partition_file);
 }
 
 int __read_buf_from_target_partition(struct file *target_partition_file, void *head, int len, int pos) {
