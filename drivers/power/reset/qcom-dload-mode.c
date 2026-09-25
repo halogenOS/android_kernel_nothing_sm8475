@@ -41,6 +41,7 @@ struct qcom_dload {
 
 static int enable_dump =
 	IS_ENABLED(CONFIG_POWER_RESET_QCOM_DOWNLOAD_MODE_DEFAULT);
+static bool dload_probed;
 static enum qcom_download_mode current_download_mode = QCOM_DOWNLOAD_NODUMP;
 static enum qcom_download_mode dump_mode = QCOM_DOWNLOAD_FULLDUMP;
 
@@ -105,6 +106,13 @@ static int param_set_download_mode(const char *val,
 	ret = param_set_int(val, kp);
 	if (ret)
 		return ret;
+
+	/*
+	 * Given on the command line, this runs at module load, before SCM may
+	 * have probed; probe applies enable_dump itself, so just record it.
+	 */
+	if (!dload_probed)
+		return 0;
 
 	msm_enable_dump_mode(enable_dump);
 	if (!enable_dump)
@@ -361,6 +369,7 @@ static int qcom_dload_probe(struct platform_device *pdev)
 	register_restart_handler(&poweroff->restart_nb);
 
 	platform_set_drvdata(pdev, poweroff);
+	dload_probed = true;
 
 	return 0;
 }
