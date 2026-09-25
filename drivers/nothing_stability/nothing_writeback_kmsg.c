@@ -28,7 +28,12 @@ pr_info("[NT_reserve_kernel_log] "fmt, ##arg)
 #define NT_rkl_err_print(fmt,arg...) \
 pr_err("[NT_reserve_kernel_log] "fmt, ##arg)
 
-#define RETRY_COUNT_FOR_GET_DEV_T 30
+/*
+ * The partitions appear once UFS and its first-stage modules are up, which on
+ * 6.6 can take well over the second 5.10 needed; wait up to ~20 s for them.
+ */
+#define RETRY_COUNT_FOR_GET_DEV_T 600
+#define RETRY_REPORT_EVERY 50
 #define PER_LOOP_MS 30
 
 #define NT_MAJOR 14
@@ -279,7 +284,8 @@ struct block_device *get_target_partition_block_device(char* partition_label)
 				return bdev;
 			}
 		}
-		NT_rkl_err_print("Get partition failed, retry count %d\n", retry_wait_for_device);
+		if (retry_wait_for_device % RETRY_REPORT_EVERY == 0)
+			NT_rkl_err_print("Get partition failed, retry count %d\n", retry_wait_for_device);
 		msleep_interruptible(PER_LOOP_MS);
 		--retry_wait_for_device;
 		}
