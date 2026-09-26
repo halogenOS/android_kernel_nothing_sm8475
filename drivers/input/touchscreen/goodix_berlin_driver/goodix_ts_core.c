@@ -1225,7 +1225,7 @@ exit:
 static int rawdata_proc_open(struct inode *inode, struct file *file)
 {
 	return single_open_size(file, rawdata_proc_show,
-			PDE_DATA(inode), PAGE_SIZE * 10);
+			pde_data(inode), PAGE_SIZE * 10);
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
@@ -2643,7 +2643,7 @@ static int TP_charger_open(struct inode *inode, struct file *file)
 static ssize_t TP_charger_write(struct file *file, const char __user *buff,
 		size_t count, loff_t *ppos)
 {
-	struct goodix_ts_core *cd = PDE_DATA(file_inode(file));
+	struct goodix_ts_core *cd = pde_data(file_inode(file));
 	struct goodix_ts_cmd temp_cmd;
 	u8 *wiredbuf = NULL;
 	int buflen = count;
