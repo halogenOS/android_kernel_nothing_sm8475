@@ -2587,7 +2587,7 @@ static int __init synx_init(void)
 		goto reg_fail;
 	}
 
-	synx_dev->class = class_create(THIS_MODULE, SYNX_DEVICE_NAME);
+	synx_dev->class = class_create(SYNX_DEVICE_NAME);
 
 	if (IS_ERR(synx_dev->class)) {
 		rc = PTR_ERR(synx_dev->class);
