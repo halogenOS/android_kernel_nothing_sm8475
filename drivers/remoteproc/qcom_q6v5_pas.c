@@ -70,6 +70,7 @@ struct adsp_data {
 	bool uses_elf64;
 	bool auto_boot;
 	bool decrypt_shutdown;
+	bool retry_shutdown;
 
 	char **proxy_pd_names;
 
@@ -114,6 +115,7 @@ struct qcom_adsp {
 	int crash_reason_stack;
 	unsigned int smem_host_id;
 	bool decrypt_shutdown;
+	bool retry_shutdown;
 	const char *info_name;
 
 	const struct firmware *firmware;
@@ -333,6 +335,21 @@ static int adsp_shutdown_poll_decrypt(struct qcom_adsp *adsp)
 		msleep(ADSP_DECRYPT_SHUTDOWN_DELAY_MS);
 		ret = qcom_scm_pas_shutdown(adsp->pas_id);
 	} while (ret == -EINVAL && --retry_num);
+
+	return ret;
+}
+
+static int adsp_pas_shutdown(struct qcom_adsp *adsp)
+{
+	int ret;
+
+	if (adsp->retry_shutdown)
+		ret = qcom_scm_pas_shutdown_retry(adsp->pas_id);
+	else
+		ret = qcom_scm_pas_shutdown(adsp->pas_id);
+
+	if (ret && adsp->decrypt_shutdown)
+		ret = adsp_shutdown_poll_decrypt(adsp);
 
 	return ret;
 }
@@ -668,9 +685,7 @@ unlock_pas_metadata:
 	 * unlock pas metadata.
 	 */
 	if (adsp->dma_phys_below_32b) {
-		err = qcom_scm_pas_shutdown(adsp->pas_id);
-		if (err && adsp->decrypt_shutdown)
-			err = adsp_shutdown_poll_decrypt(adsp);
+		err = adsp_pas_shutdown(adsp);
 		if (err)
 			panic("Panicking, remoteproc %s failed to unlock pas_metadata.\n",
 			      rproc->name);
@@ -1070,10 +1085,7 @@ static int adsp_stop(struct rproc *rproc)
 		dev_err(adsp->dev, "timed out on wait\n");
 
 	qcom_q6v5_pas_set_bw(&adsp->q6v5, UINT_MAX, UINT_MAX);
-	ret = qcom_scm_pas_shutdown(adsp->pas_id);
-	if (ret && adsp->decrypt_shutdown)
-		ret = adsp_shutdown_poll_decrypt(adsp);
-
+	ret = adsp_pas_shutdown(adsp);
 	if (ret)
 		panic("Panicking, remoteproc %s failed to shutdown.\n", rproc->name);
 
@@ -1436,6 +1448,7 @@ static int adsp_probe(struct platform_device *pdev)
 	adsp->pas_id = desc->pas_id;
 	adsp->info_name = desc->sysmon_name;
 	adsp->decrypt_shutdown = desc->decrypt_shutdown;
+	adsp->retry_shutdown = desc->retry_shutdown;
 	adsp->both_dumps = desc->both_dumps;
 	adsp->region_assign_idx = desc->region_assign_idx;
 	adsp->region_assign_count = min_t(int, MAX_ASSIGN_COUNT, desc->region_assign_count);
@@ -2530,6 +2543,7 @@ static const struct adsp_data waipio_mpss_resource = {
 	.load_state = "modem",
 	.ssctl_id = 0x12,
 	.dma_phys_below_32b = true,
+	.retry_shutdown = true,
 };
 
 static const struct adsp_data waipio_slpi_resource = {
@@ -2579,6 +2593,7 @@ static const struct adsp_data cape_mpss_resource = {
 	.load_state = "modem",
 	.ssctl_id = 0x12,
 	.dma_phys_below_32b = true,
+	.retry_shutdown = true,
 };
 
 static const struct of_device_id adsp_of_match[] = {
