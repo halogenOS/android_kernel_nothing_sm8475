@@ -392,7 +392,7 @@ static int sensors_ssc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	sns_ctl.dev_class = class_create(THIS_MODULE, CLASS_NAME);
+	sns_ctl.dev_class = class_create(CLASS_NAME);
 	if (sns_ctl.dev_class == NULL) {
 		pr_err("%s: class_create fail.\n", __func__);
 		goto res_err;
