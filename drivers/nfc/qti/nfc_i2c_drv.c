@@ -156,7 +156,7 @@ int i2c_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 	memset(buf, 0x00, count);
 	/* Read data */
 	ret = i2c_master_recv(nfc_dev->i2c_dev.client, buf, count);
-	NFCLOG_IPC(nfc_dev, false, "%s of %d bytes, ret %d", __func__, count,
+	NFCLOG_IPC(nfc_dev, false, "%s of %zu bytes, ret %d", __func__, count,
 								ret);
 	if (ret <= 0) {
 		pr_err("%s: returned %d\n", __func__, ret);
@@ -201,7 +201,7 @@ int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 
 	pr_debug("%s : writing %zu bytes.\n", __func__, count);
 
-	NFCLOG_IPC(nfc_dev, false, "%s sending %d B", __func__, count);
+	NFCLOG_IPC(nfc_dev, false, "%s sending %zu B", __func__, count);
 
 	for (i = 0; i < disp_len; i++)
 		NFCLOG_IPC(nfc_dev, false, " %02x", buf[i]);
@@ -297,7 +297,7 @@ static struct attribute_group nfc_i2c_attr_grp = {
 	.attrs = nfc_i2c_attrs,
 };
 
-int nfc_i2c_dev_probe(struct i2c_client *client, const struct i2c_device_id *id)
+int nfc_i2c_dev_probe(struct i2c_client *client)
 {
 	int ret = 0;
 	struct nfc_dev *nfc_dev = NULL;
@@ -456,22 +456,20 @@ err:
 	return ret;
 }
 
-int nfc_i2c_dev_remove(struct i2c_client *client)
+void nfc_i2c_dev_remove(struct i2c_client *client)
 {
-	int ret = 0;
 	struct nfc_dev *nfc_dev = NULL;
 
 	pr_info("%s: remove device\n", __func__);
 	nfc_dev = i2c_get_clientdata(client);
 	if (!nfc_dev) {
 		pr_err("%s: device doesn't exist anymore\n", __func__);
-		ret = -ENODEV;
-		return ret;
+		return;
 	}
 
 	if (nfc_dev->dev_ref_count > 0) {
 		pr_err("%s: device already in use\n", __func__);
-		return -EBUSY;
+		return;
 	}
 
 	gpio_set_value(nfc_dev->configs.gpio.ven, 0);
@@ -504,7 +502,6 @@ int nfc_i2c_dev_remove(struct i2c_client *client)
 	kfree(nfc_dev->read_kbuf);
 	kfree(nfc_dev->write_kbuf);
 	kfree(nfc_dev);
-	return ret;
 }
 
 int nfc_i2c_dev_suspend(struct device *device)
