@@ -20,6 +20,7 @@ static const struct msm_pinctrl_soc_data waipio_pinctrl = {
 	.groups = waipio_groups,
 	.ngroups = ARRAY_SIZE(waipio_groups),
 	.ngpios = 211,
+	.egpio_func = 9,
 	.wakeirq_map = waipio_pdc_map,
 	.nwakeirq_map = ARRAY_SIZE(waipio_pdc_map),
 	.qup_regs = waipio_qup_regs,

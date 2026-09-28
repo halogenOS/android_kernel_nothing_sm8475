@@ -20,6 +20,7 @@ static const struct msm_pinctrl_soc_data cape_pinctrl = {
 	.groups = cape_groups,
 	.ngroups = ARRAY_SIZE(cape_groups),
 	.ngpios = 211,
+	.egpio_func = 9,
 	.qup_regs = cape_qup_regs,
 	.nqup_regs = ARRAY_SIZE(cape_qup_regs),
 	.wakeirq_map = cape_pdc_map,
