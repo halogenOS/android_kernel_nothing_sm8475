@@ -80,6 +80,30 @@ config SCSI_UFS_QCOM
 	  Select this if you have UFS controller on QCOM chipset.
 	  If unsure, say N.
 
+config UFSFEATURE
+	bool "UFS feature activate"
+	default y
+	depends on SCSI_UFS_QCOM
+	help
+	  UFS feature activate such as hpb, tw and etc.
+
+config UFSHID
+	bool "UFS Host Initiated Defrag support"
+	default y
+	depends on UFSFEATURE
+	help
+	  UFS HID Feature Enable
+
+config UFSHID_POC
+	bool "UFSHID_POC test"
+	depends on UFSHID
+	help
+	  UFS HID POC test
+	  1. block to enter suspend state
+	  2. auto_hibern8 enable/disable (HCI)
+	  3. set flag bDefragOperation
+	  4. debug msg enable (default : disable)
+
 config SCSI_UFS_MEDIATEK
 	tristate "Mediatek specific hooks to UFS controller platform driver"
 	depends on SCSI_UFSHCD_PLATFORM && ARCH_MEDIATEK

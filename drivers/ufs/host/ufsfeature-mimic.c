@@ -14,7 +14,7 @@
  * linux/drivers/ufs/host/ufshcd.c
  */
 
-#include "ufshcd.h"
+#include <ufs/ufshcd.h>
 #include "ufsfeature.h"
 
 void ufsf_scsi_unblock_requests(struct ufs_hba *hba)
@@ -38,7 +38,7 @@ int ufsf_wait_for_doorbell_clr(struct ufs_hba *hba, u64 wait_timeout_us)
 	bool timeout = false, do_last_check = false;
 	ktime_t start;
 
-	ufshcd_hold(hba, false);
+	ufshcd_hold(hba);
 	spin_lock_irqsave(hba->host->host_lock, flags);
 	/*
 	 * Wait for all the outstanding tasks/transfer requests.

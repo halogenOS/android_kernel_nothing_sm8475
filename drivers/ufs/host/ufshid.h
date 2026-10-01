@@ -39,7 +39,7 @@
 #define _UFSHID_H_
 
 #include <linux/blktrace_api.h>
-#include <asm-generic/unaligned.h>
+#include <asm/unaligned.h>
 
 #define UFSHID_VER					0x0101
 #define UFSHID_DD_VER					0x010205

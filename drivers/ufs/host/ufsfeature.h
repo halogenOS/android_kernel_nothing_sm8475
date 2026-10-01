@@ -40,12 +40,11 @@
 
 #include <scsi/scsi_cmnd.h>
 
-#include "ufs.h"
+#include <ufs/ufs.h>
 
 #include "ufshid.h"
 
 #define UFS_UPIU_MAX_GENERAL_LUN		8
-#define UFSHCD_STATE_OPERATIONAL		2	/* ufshcd.c */
 
 /* UFSHCD error handling flags */
 enum {
@@ -55,7 +54,6 @@ enum {
 	((h)->eh_flags & UFSHCD_EH_IN_PROGRESS)		/* ufshcd.c */
 
 
-#define UFSFEATURE_QUERY_OPCODE			0x5500
 
 /* Version info */
 #define UFSFEATURE_DD_VER			0x020001
@@ -96,7 +94,6 @@ struct ufsf_feature {
 	int num_lu;
 	int slave_conf_cnt;
 	struct scsi_device *sdev_ufs_lu[UFS_UPIU_MAX_GENERAL_LUN];
-	bool issue_ioctl;
 	bool check_init;
 	struct work_struct device_check_work;
 	struct mutex device_check_lock;
@@ -112,12 +109,8 @@ struct ufsf_feature {
 
 struct ufs_hba;
 struct ufshcd_lrb;
-struct ufs_ioctl_query_data;
 
 void ufsf_device_check(struct ufs_hba *hba);
-int ufsf_query_ioctl(struct ufsf_feature *ufsf, int lun, void __user *buffer,
-		     struct ufs_ioctl_query_data *ioctl_data,
-		     u8 selector);
 bool ufsf_is_valid_lun(int lun);
 void ufsf_slave_configure(struct ufsf_feature *ufsf, struct scsi_device *sdev);
 void ufsf_change_lun(struct ufsf_feature *ufsf, struct ufshcd_lrb *lrbp);
@@ -147,10 +140,5 @@ int ufsf_wait_for_doorbell_clr(struct ufs_hba *hba, u64 wait_timeout_us);
 #if defined(CONFIG_UFSHID)
 #define DEVICE_DESC_PARAM_HID_VER			0x59
 #endif
-
-static inline int ufsf_check_query(__u32 opcode)
-{
-	return (opcode & 0xffff0000) >> 16 == UFSFEATURE_QUERY_OPCODE;
-}
 
 #endif /* End of Header */

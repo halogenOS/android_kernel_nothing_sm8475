@@ -2110,8 +2110,12 @@ static int ufs_qcom_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op,
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	int err = 0;
 
-	if (status == PRE_CHANGE)
+	if (status == PRE_CHANGE) {
+#if defined(CONFIG_UFSFEATURE)
+		ufsf_suspend(ufs_qcom_get_ufsf(hba));
+#endif
 		return 0;
+	}
 
 	/*
 	 * If UniPro link is not active or OFF, PHY ref_clk, main PHY analog
@@ -2173,6 +2177,10 @@ static int ufs_qcom_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	if (host->dbg_en)
 		trace_ufs_qcom_resume(dev_name(hba->dev), pm_op, hba->rpm_lvl, hba->spm_lvl,
 				hba->uic_link_state, hba->curr_dev_pwr_mode, err);
+
+#if defined(CONFIG_UFSFEATURE)
+	ufsf_resume(ufs_qcom_get_ufsf(hba), ufshcd_is_link_off(hba));
+#endif
 	return 0;
 }
 
