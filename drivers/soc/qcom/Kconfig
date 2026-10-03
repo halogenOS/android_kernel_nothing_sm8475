@@ -518,7 +518,7 @@ config QCOM_STATS
 	  Qualcomm Technologies, Inc. (QTI) Sleep stats driver to read
 	  the shared memory exported by the remote processor related to
 	  various SoC level low power modes statistics and export to debugfs
-	  interface.
+	  interface. A summary is also exported to sysfs.
 
 config QCOM_LOGBUF_VENDOR_HOOKS
 	tristate "QTI Logbuf Vendor Hooks Support"

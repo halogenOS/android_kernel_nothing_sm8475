@@ -781,7 +781,7 @@ int llc_stats_get_active_scids(struct llc_island_stats_active_scids *llc_active_
 }
 EXPORT_SYMBOL_GPL(llc_stats_get_active_scids);
 
-static void qcom_print_stats(struct seq_file *s, const struct sleep_stats *stat)
+static u64 qcom_stats_accumulated(const struct sleep_stats *stat)
 {
 	u64 accumulated = stat->accumulated;
 	/*
@@ -791,10 +791,15 @@ static void qcom_print_stats(struct seq_file *s, const struct sleep_stats *stat)
 	if (stat->last_entered_at > stat->last_exited_at)
 		accumulated += arch_timer_read_counter() - stat->last_entered_at;
 
+	return accumulated;
+}
+
+static void qcom_print_stats(struct seq_file *s, const struct sleep_stats *stat)
+{
 	seq_printf(s, "Count: %u\n", stat->count);
 	seq_printf(s, "Last Entered At: %llu\n", stat->last_entered_at);
 	seq_printf(s, "Last Exited At: %llu\n", stat->last_exited_at);
-	seq_printf(s, "Accumulated Duration: %llu\n", accumulated);
+	seq_printf(s, "Accumulated Duration: %llu\n", qcom_stats_accumulated(stat));
 }
 
 static int qcom_subsystem_sleep_stats_show(struct seq_file *s, void *unused)
@@ -830,6 +835,74 @@ static int qcom_soc_sleep_stats_show(struct seq_file *s, void *unused)
 
 	return 0;
 }
+
+static struct subsystem_data *qcom_find_subsystem(const char *name)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(subsystems); i++)
+		if (!strcmp(subsystems[i].name, name))
+			return &subsystems[i];
+
+	return NULL;
+}
+
+static int qcom_stats_emit_at(char *buf, int at, const char *name,
+			      const struct sleep_stats *stat)
+{
+	return sysfs_emit_at(buf, at, "%-12s %10u %20llu %20llu %20llu\n", name,
+			     stat->count, stat->last_entered_at,
+			     stat->last_exited_at, qcom_stats_accumulated(stat));
+}
+
+/*
+ * One table of all SoC low power modes and subsystems, in arch timer ticks,
+ * readable on builds that do not mount debugfs.
+ */
+static ssize_t sleep_stats_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct stats_drvdata *stats = dev_get_drvdata(dev);
+	char stat_type[sizeof(u32) + 1] = {0};
+	struct subsystem_data *subsystem;
+	struct sleep_stats stat, *smem_stat;
+	struct property *prop;
+	const char *name;
+	int len, i;
+
+	len = sysfs_emit(buf, "%-12s %10s %20s %20s %20s\n", "name", "count",
+			 "last_entered_at", "last_exited_at", "accumulated");
+
+	for (i = 0; i < stats->config->num_records; i++) {
+		memcpy_fromio(&stat, stats->d[i].base, sizeof(stat));
+		get_sleep_stat_name(stat.stat_type, stat_type);
+		len += qcom_stats_emit_at(buf, len, stat_type, &stat);
+	}
+
+	if (!stats->config->subsystem_stats_in_smem)
+		return len;
+
+	of_property_for_each_string(dev->of_node, "ss-name", prop, name) {
+		subsystem = qcom_find_subsystem(name);
+		if (!subsystem)
+			continue;
+
+		smem_stat = qcom_smem_get(subsystem->pid, subsystem->smem_item, NULL);
+		if (IS_ERR(smem_stat))
+			continue;
+
+		len += qcom_stats_emit_at(buf, len, name, smem_stat);
+	}
+
+	return len;
+}
+static DEVICE_ATTR_RO(sleep_stats);
+
+static struct attribute *qcom_stats_attrs[] = {
+	&dev_attr_sleep_stats.attr,
+	NULL
+};
+ATTRIBUTE_GROUPS(qcom_stats);
 
 static void print_ddr_stats(struct seq_file *s, int *count,
 			     struct sleep_stats *data, u64 accumulated_duration)
@@ -1337,6 +1410,7 @@ static struct platform_driver qcom_stats = {
 		.name = "qcom_stats",
 		.of_match_table = qcom_stats_table,
 		.pm = &qcom_stats_pm_ops,
+		.dev_groups = qcom_stats_groups,
 	},
 };
 
