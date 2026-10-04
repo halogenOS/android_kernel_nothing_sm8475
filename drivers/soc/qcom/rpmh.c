@@ -392,14 +392,83 @@ static int send_single(struct rpmh_ctrlr *ctrlr, enum rpmh_state state,
 	return rpmh_rsc_write_ctrl_data(ctrlr_to_drv(ctrlr), &rpm_msg.msg, ch);
 }
 
-static void rpmh_print_vote(struct seq_buf *s, const char *set, u32 addr, u32 val)
+static const char * const rpmh_vote_set_names[] = {
+	[RPMH_VOTE_SLEEP]	= "sleep",
+	[RPMH_VOTE_ACTIVE]	= "active",
+	[RPMH_VOTE_BATCH]	= "batch",
+};
+
+/*
+ * A cached request without a sleep value keeps its active value through
+ * sleep, so it is collected with that value as "active". Zero votes are left
+ * out, since they do not hold a resource up. Called with cache_lock held.
+ */
+static u32 rpmh_collect_sleep_votes(struct rpmh_ctrlr *ctrlr,
+				    struct rpmh_sleep_vote *votes)
+{
+	const struct tcs_request *batch = &ctrlr->batch_cache[RPMH_SLEEP_STATE].msg;
+	struct cache_req *req;
+	bool has_sleep;
+	u32 n = 0, val;
+	int i;
+
+	for (i = 0; i < ctrlr->non_batch_cache_idx; i++) {
+		req = &ctrlr->non_batch_cache[i];
+		has_sleep = req->sleep_val != UINT_MAX;
+		val = has_sleep ? req->sleep_val : req->wake_val;
+		if (val && val != UINT_MAX)
+			votes[n++] = (struct rpmh_sleep_vote) {
+				.addr = req->addr,
+				.val = val,
+				.set = has_sleep ? RPMH_VOTE_SLEEP : RPMH_VOTE_ACTIVE,
+			};
+	}
+
+	for (i = 0; i < batch->num_cmds; i++)
+		if (batch->cmds[i].data)
+			votes[n++] = (struct rpmh_sleep_vote) {
+				.addr = batch->cmds[i].addr,
+				.val = batch->cmds[i].data,
+				.set = RPMH_VOTE_BATCH,
+			};
+
+	return n;
+}
+
+/*
+ * ARC resources are voted by index into the level table cmd-db stores as
+ * their aux data; print the level the index stands for next to it.
+ */
+static void rpmh_print_arc_level(struct seq_buf *s, const char *id, u32 hlvl)
+{
+	const __le16 *vlvl;
+	size_t len;
+
+	if (cmd_db_read_slave_id(id) != CMD_DB_HW_ARC)
+		return;
+
+	vlvl = cmd_db_read_aux_data(id, &len);
+	if (IS_ERR(vlvl) || hlvl >= len / sizeof(*vlvl))
+		return;
+
+	seq_buf_printf(s, " (level %u)", le16_to_cpu(vlvl[hlvl]));
+}
+
+static void rpmh_print_votes(struct seq_buf *s, const struct rpmh_sleep_vote *votes,
+			     u32 n)
 {
 	char id[CMD_DB_ID_LEN];
+	u32 i;
 
-	if (cmd_db_read_id(addr, id))
-		strscpy(id, "?", sizeof(id));
+	for (i = 0; i < n; i++) {
+		if (cmd_db_read_id(votes[i].addr, id))
+			strscpy(id, "?", sizeof(id));
 
-	seq_buf_printf(s, "%-6s %-8s %#07x %#x\n", set, id, addr, val);
+		seq_buf_printf(s, "%-6s %-8s %#07x %#x", rpmh_vote_set_names[votes[i].set],
+			       id, votes[i].addr, votes[i].val);
+		rpmh_print_arc_level(s, id, votes[i].val);
+		seq_buf_printf(s, "\n");
+	}
 }
 
 /**
@@ -407,35 +476,57 @@ static void rpmh_print_vote(struct seq_buf *s, const char *set, u32 addr, u32 va
  *
  * @ctrlr: Controller whose cache is listed
  * @s:     Buffer to print into
- *
- * A cached request without a sleep value keeps its active value through
- * sleep, so it is listed with that value as "active". Zero votes are left
- * out, since they do not hold a resource up.
  */
 void rpmh_print_sleep_votes(struct rpmh_ctrlr *ctrlr, struct seq_buf *s)
 {
-	const struct tcs_request *batch = &ctrlr->batch_cache[RPMH_SLEEP_STATE].msg;
-	struct cache_req *req;
+	struct rpmh_sleep_vote *votes;
 	unsigned long flags;
-	bool has_sleep;
-	u32 val;
-	int i;
+	u32 n;
+
+	votes = kcalloc(RPMH_MAX_SLEEP_VOTES, sizeof(*votes), GFP_KERNEL);
+	if (!votes)
+		return;
 
 	spin_lock_irqsave(&ctrlr->cache_lock, flags);
-
-	for (i = 0; i < ctrlr->non_batch_cache_idx; i++) {
-		req = &ctrlr->non_batch_cache[i];
-		has_sleep = req->sleep_val != UINT_MAX;
-		val = has_sleep ? req->sleep_val : req->wake_val;
-		if (val && val != UINT_MAX)
-			rpmh_print_vote(s, has_sleep ? "sleep" : "active", req->addr, val);
-	}
-
-	for (i = 0; i < batch->num_cmds; i++)
-		if (batch->cmds[i].data)
-			rpmh_print_vote(s, "batch", batch->cmds[i].addr, batch->cmds[i].data);
-
+	n = rpmh_collect_sleep_votes(ctrlr, votes);
 	spin_unlock_irqrestore(&ctrlr->cache_lock, flags);
+
+	rpmh_print_votes(s, votes, n);
+	kfree(votes);
+}
+
+/**
+ * rpmh_record_suspend_votes() - Keep the sleep votes of a system suspend
+ *
+ * @ctrlr: Controller whose cache is recorded
+ *
+ * Called when the system enters suspend, after all devices are suspended,
+ * so the record shows what the drivers leave voted through that sleep.
+ */
+void rpmh_record_suspend_votes(struct rpmh_ctrlr *ctrlr)
+{
+	unsigned long flags;
+
+	if (!ctrlr->suspend_votes)
+		return;
+
+	spin_lock_irqsave(&ctrlr->cache_lock, flags);
+	ctrlr->num_suspend_votes = rpmh_collect_sleep_votes(ctrlr, ctrlr->suspend_votes);
+	ctrlr->suspends++;
+	spin_unlock_irqrestore(&ctrlr->cache_lock, flags);
+}
+
+/**
+ * rpmh_print_suspend_votes() - List the sleep votes of the last system suspend
+ *
+ * @ctrlr: Controller whose record is listed
+ * @s:     Buffer to print into
+ */
+void rpmh_print_suspend_votes(struct rpmh_ctrlr *ctrlr, struct seq_buf *s)
+{
+	seq_buf_printf(s, "suspends: %u\n", ctrlr->suspends);
+	if (ctrlr->suspend_votes)
+		rpmh_print_votes(s, ctrlr->suspend_votes, ctrlr->num_suspend_votes);
 }
 
 int _rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch)

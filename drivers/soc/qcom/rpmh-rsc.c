@@ -17,6 +17,7 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
+#include <linux/once.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
@@ -29,6 +30,7 @@
 #include <linux/wait.h>
 
 #include <clocksource/arm_arch_timer.h>
+#include <trace/events/power.h>
 #include <soc/qcom/cmd-db.h>
 #include <soc/qcom/tcs.h>
 #include <soc/qcom/crm.h>
@@ -1745,6 +1747,48 @@ static ssize_t sleep_votes_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(sleep_votes);
 
+/* Sleep votes recorded when the system last entered suspend */
+static ssize_t suspend_votes_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	struct rsc_drv *drv = dev_get_drvdata(dev);
+	struct seq_buf s;
+
+	seq_buf_init(&s, buf, PAGE_SIZE);
+	rpmh_print_suspend_votes(&drv->client, &s);
+
+	return seq_buf_used(&s);
+}
+static DEVICE_ATTR_RO(suspend_votes);
+
+static struct attribute *rpmh_rsc_drv_attrs[] = {
+	&dev_attr_sleep_votes.attr,
+	&dev_attr_suspend_votes.attr,
+	NULL
+};
+
+static const struct attribute_group rpmh_rsc_drv_attr_group = {
+	.attrs = rpmh_rsc_drv_attrs,
+};
+
+static void rpmh_rsc_suspend_trace_probe(void *unused, const char *action,
+					 int val, bool start)
+{
+	int i;
+
+	if (!start || val <= 0 || strcmp(action, "machine_suspend"))
+		return;
+
+	for (i = 0; i < __rsc_count; i++)
+		rpmh_record_suspend_votes(&__rsc_drv[i]->client);
+}
+
+static void rpmh_rsc_watch_suspend(void)
+{
+	if (register_trace_suspend_resume(rpmh_rsc_suspend_trace_probe, NULL))
+		pr_warn("rpmh-rsc: cannot record sleep votes at suspend\n");
+}
+
 static int rpmh_rsc_probe(struct platform_device *pdev)
 {
 	struct device_node *np, *dn = pdev->dev.of_node;
@@ -1893,7 +1937,13 @@ static int rpmh_rsc_probe(struct platform_device *pdev)
 		for (j = 0; j < CMD_DB_MAX_RESOURCES; j++)
 			INIT_LIST_HEAD(&drv[i].client.non_batch_cache[j].list);
 
-		ret = device_create_file(drv[i].dev, &dev_attr_sleep_votes);
+		drv[i].client.suspend_votes = devm_kcalloc(&pdev->dev, RPMH_MAX_SLEEP_VOTES,
+							   sizeof(struct rpmh_sleep_vote),
+							   GFP_KERNEL);
+		if (!drv[i].client.suspend_votes)
+			return -ENOMEM;
+
+		ret = sysfs_create_group(&drv[i].dev->kobj, &rpmh_rsc_drv_attr_group);
 		if (ret)
 			return ret;
 
@@ -1922,6 +1972,8 @@ static int rpmh_rsc_probe(struct platform_device *pdev)
 		if (ret)
 			return ret;
 	}
+
+	DO_ONCE_SLEEPABLE(rpmh_rsc_watch_suspend);
 
 	INIT_LIST_HEAD(&rsc_top->list);
 	list_add_tail(&rsc_top->list, &rpmh_rsc_dev_list);

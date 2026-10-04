@@ -97,6 +97,27 @@ struct rpmh_request {
 	const struct device *dev;
 };
 
+enum rpmh_vote_set {
+	RPMH_VOTE_SLEEP,
+	RPMH_VOTE_ACTIVE,
+	RPMH_VOTE_BATCH,
+};
+
+/**
+ * struct rpmh_sleep_vote: a vote that stays in place while the SoC sleeps
+ *
+ * @addr: resource address
+ * @val: value held through sleep
+ * @set: where the value comes from
+ */
+struct rpmh_sleep_vote {
+	u32 addr;
+	u32 val;
+	enum rpmh_vote_set set;
+};
+
+#define RPMH_MAX_SLEEP_VOTES	(CMD_DB_MAX_RESOURCES + MAX_RPMH_PAYLOAD)
+
 /**
  * struct rpmh_ctrlr: our representation of the controller
  *
@@ -105,6 +126,9 @@ struct rpmh_request {
  * @in_solver_mode: Controller is busy in solver mode
  * @flags: Controller specific flags
  * @batch_cache: Cache sleep and wake requests sent as batch
+ * @suspend_votes: Sleep votes recorded when the system last entered suspend
+ * @num_suspend_votes: Number of entries in @suspend_votes
+ * @suspends: Number of system suspends recorded
  */
 struct rpmh_ctrlr {
 	spinlock_t cache_lock;
@@ -114,6 +138,9 @@ struct rpmh_ctrlr {
 	struct rpmh_request batch_cache[RPMH_ACTIVE_ONLY_STATE];
 	u32 non_batch_cache_idx;
 	struct cache_req *non_batch_cache;
+	struct rpmh_sleep_vote *suspend_votes;
+	u32 num_suspend_votes;
+	u32 suspends;
 };
 
 struct rsc_ver {
@@ -235,6 +262,8 @@ void rpmh_tx_done(const struct tcs_request *msg);
 int rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch);
 int _rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch);
 void rpmh_print_sleep_votes(struct rpmh_ctrlr *ctrlr, struct seq_buf *s);
+void rpmh_print_suspend_votes(struct rpmh_ctrlr *ctrlr, struct seq_buf *s);
+void rpmh_record_suspend_votes(struct rpmh_ctrlr *ctrlr);
 
 int rpmh_rsc_init_fast_path(struct rsc_drv *drv, const struct tcs_request *msg, int ch);
 int rpmh_rsc_update_fast_path(struct rsc_drv *drv,
