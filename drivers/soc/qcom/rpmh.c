@@ -14,11 +14,13 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/seq_buf.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/wait.h>
 
+#include <soc/qcom/cmd-db.h>
 #include <soc/qcom/rpmh.h>
 
 #include "rpmh-internal.h"
@@ -388,6 +390,52 @@ static int send_single(struct rpmh_ctrlr *ctrlr, enum rpmh_state state,
 	rpm_msg.msg.num_cmds = 1;
 
 	return rpmh_rsc_write_ctrl_data(ctrlr_to_drv(ctrlr), &rpm_msg.msg, ch);
+}
+
+static void rpmh_print_vote(struct seq_buf *s, const char *set, u32 addr, u32 val)
+{
+	char id[CMD_DB_ID_LEN];
+
+	if (cmd_db_read_id(addr, id))
+		strscpy(id, "?", sizeof(id));
+
+	seq_buf_printf(s, "%-6s %-8s %#07x %#x\n", set, id, addr, val);
+}
+
+/**
+ * rpmh_print_sleep_votes() - List the votes a controller keeps while asleep
+ *
+ * @ctrlr: Controller whose cache is listed
+ * @s:     Buffer to print into
+ *
+ * A cached request without a sleep value keeps its active value through
+ * sleep, so it is listed with that value as "active". Zero votes are left
+ * out, since they do not hold a resource up.
+ */
+void rpmh_print_sleep_votes(struct rpmh_ctrlr *ctrlr, struct seq_buf *s)
+{
+	const struct tcs_request *batch = &ctrlr->batch_cache[RPMH_SLEEP_STATE].msg;
+	struct cache_req *req;
+	unsigned long flags;
+	bool has_sleep;
+	u32 val;
+	int i;
+
+	spin_lock_irqsave(&ctrlr->cache_lock, flags);
+
+	for (i = 0; i < ctrlr->non_batch_cache_idx; i++) {
+		req = &ctrlr->non_batch_cache[i];
+		has_sleep = req->sleep_val != UINT_MAX;
+		val = has_sleep ? req->sleep_val : req->wake_val;
+		if (val && val != UINT_MAX)
+			rpmh_print_vote(s, has_sleep ? "sleep" : "active", req->addr, val);
+	}
+
+	for (i = 0; i < batch->num_cmds; i++)
+		if (batch->cmds[i].data)
+			rpmh_print_vote(s, "batch", batch->cmds[i].addr, batch->cmds[i].data);
+
+	spin_unlock_irqrestore(&ctrlr->cache_lock, flags);
 }
 
 int _rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch)

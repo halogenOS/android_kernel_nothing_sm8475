@@ -12,6 +12,8 @@
 #include <linux/wait.h>
 #include <soc/qcom/tcs.h>
 
+struct seq_buf;
+
 #define MAX_NAME_LENGTH			20
 
 #define CH0				0
@@ -232,6 +234,7 @@ const struct device *rpmh_rsc_get_device(const char *name, u32 drv_id);
 void rpmh_tx_done(const struct tcs_request *msg);
 int rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch);
 int _rpmh_flush(struct rpmh_ctrlr *ctrlr, int ch);
+void rpmh_print_sleep_votes(struct rpmh_ctrlr *ctrlr, struct seq_buf *s);
 
 int rpmh_rsc_init_fast_path(struct rsc_drv *drv, const struct tcs_request *msg, int ch);
 int rpmh_rsc_update_fast_path(struct rsc_drv *drv,

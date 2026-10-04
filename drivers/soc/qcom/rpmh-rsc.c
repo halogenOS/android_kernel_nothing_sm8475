@@ -23,6 +23,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
+#include <linux/seq_buf.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
@@ -1729,6 +1730,21 @@ static int rpmh_probe_tcs_config(struct rsc_drv *drv)
 	return 0;
 }
 
+/* Votes this DRV leaves in place while the SoC sleeps, readable without debugfs */
+static ssize_t sleep_votes_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct rsc_drv *drv = dev_get_drvdata(dev);
+	struct seq_buf s;
+
+	seq_buf_init(&s, buf, PAGE_SIZE);
+	seq_buf_printf(&s, "%-6s %-8s %7s %s\n", "set", "resource", "addr", "value");
+	rpmh_print_sleep_votes(&drv->client, &s);
+
+	return seq_buf_used(&s);
+}
+static DEVICE_ATTR_RO(sleep_votes);
+
 static int rpmh_rsc_probe(struct platform_device *pdev)
 {
 	struct device_node *np, *dn = pdev->dev.of_node;
@@ -1876,6 +1892,10 @@ static int rpmh_rsc_probe(struct platform_device *pdev)
 
 		for (j = 0; j < CMD_DB_MAX_RESOURCES; j++)
 			INIT_LIST_HEAD(&drv[i].client.non_batch_cache[j].list);
+
+		ret = device_create_file(drv[i].dev, &dev_attr_sleep_votes);
+		if (ret)
+			return ret;
 
 		irq = platform_get_irq(pdev, drv[i].id);
 		if (irq < 0)

@@ -252,6 +252,47 @@ bool cmd_db_match_resource_addr(u32 addr1, u32 addr2)
 EXPORT_SYMBOL_GPL(cmd_db_match_resource_addr);
 
 /**
+ * cmd_db_read_id() - Look up the resource id for a resource address
+ *
+ * @addr: resource address; any register offset within a VRM resource matches
+ * @id: buffer for the id, at least CMD_DB_ID_LEN bytes
+ *
+ * Return: 0 on success, errno otherwise
+ */
+int cmd_db_read_id(u32 addr, char *id)
+{
+	const struct rsc_hdr *rsc_hdr;
+	const struct entry_header *ent;
+	size_t len;
+	int ret, i, j;
+
+	BUILD_BUG_ON(CMD_DB_ID_LEN != sizeof(ent->id) + 1);
+
+	ret = cmd_db_ready();
+	if (ret)
+		return ret;
+
+	for (i = 0; i < MAX_SLV_ID; i++) {
+		rsc_hdr = &cmd_db_header->header[i];
+		if (!rsc_hdr->slv_id)
+			break;
+
+		ent = rsc_to_entry_header(rsc_hdr);
+		for (j = 0; j < le16_to_cpu(rsc_hdr->cnt); j++, ent++) {
+			if (cmd_db_match_resource_addr(le32_to_cpu(ent->addr), addr)) {
+				len = strnlen(ent->id, sizeof(ent->id));
+				memcpy(id, ent->id, len);
+				id[len] = '\0';
+				return 0;
+			}
+		}
+	}
+
+	return -ENODEV;
+}
+EXPORT_SYMBOL_GPL(cmd_db_read_id);
+
+/**
  * cmd_db_read_slave_id - Get the slave ID for a given resource address
  *
  * @id: Resource id to query the DB for version
