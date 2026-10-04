@@ -503,13 +503,6 @@ static int gdsc_disable(struct regulator_dev *rdev)
 		}
 	}
 
-	regmap_read(sc->regmap, REG_OFFSET, &regval);
-	if (regval & HW_CONTROL_MASK) {
-		dev_warn(&rdev->dev, "Invalid Disable while %s is under HW control\n",
-				sc->rdesc.name);
-		return -EBUSY;
-	}
-
 	if (sc->clk_ctrl_count)
 		gdsc_clk_ctrl(sc, false);
 
