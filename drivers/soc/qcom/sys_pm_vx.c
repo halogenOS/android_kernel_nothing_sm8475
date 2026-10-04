@@ -16,6 +16,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
+#include <linux/seq_buf.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/soc/qcom/qcom_aoss.h>
@@ -92,6 +93,7 @@ struct vx_platform_data {
 	u32 timer_ms;
 	int monitor_status;
 	bool debug_dump_enable;
+	unsigned int blocked[MAX_DRV_NAMES];
 };
 
 static struct vx_platform_data *g_pd;
@@ -105,6 +107,13 @@ enum {
 	DISABLE_MSG,
 	CXPC_MSG,
 	AOSS_SHUTDOWN_MSG,
+};
+
+static const char * const drv_names_cape[][MAX_DRV_NAMES] = {
+	[CXPC_DRV_NAME] = {"TZ", "HYP", "HLOS", "L3", "SECPROC", "AUDIO", "SENSOR", "AOP",
+			"DEBUG", "GPU", "DISPLAY", "COMPUTE_DSP", "TME_SW", "TME_HW",
+			"MDM SW", "MDM HW", "WLAN RF", "WLAN BB", "DDR AUX", "ARC CPRF", ""},
+	[AOSS_DRV_NAME] = {""},
 };
 
 static const char * const drv_names_kalama[][MAX_DRV_NAMES] = {
@@ -409,6 +418,7 @@ static void vx_check_drv(struct vx_platform_data *pd)
 				break;
 			if (j == log.loglines - 1) {
 				pr_warn("DRV: %s has blocked power collapse\n", pd->cxpc_drvs[i]);
+				pd->blocked[i]++;
 				trigger_dump(pd);
 			}
 		}
@@ -420,7 +430,7 @@ static void vx_check_drv(struct vx_platform_data *pd)
 }
 
 static void show_vx_data(struct vx_platform_data *pd, struct vx_log *log,
-			 struct seq_file *seq)
+			 struct seq_buf *seq)
 {
 	int i, j;
 	struct vx_header *hdr = &log->header;
@@ -434,7 +444,7 @@ static void show_vx_data(struct vx_platform_data *pd, struct vx_log *log,
 	if (!drvs || !ndrv)
 		return;
 
-	seq_printf(seq, "Mode           : %s\n"
+	seq_buf_printf(seq, "Mode           : %s\n"
 			"Duration (ms)  : %u\n"
 			"Time Shift     : %u\n"
 			"Flush Threshold: %u\n"
@@ -445,37 +455,36 @@ static void show_vx_data(struct vx_platform_data *pd, struct vx_log *log,
 			hdr->flags.flush_threshold,
 			hdr->mode.logsize);
 
-	seq_puts(seq, "Timestamp|");
+	seq_buf_printf(seq, "Timestamp|");
 
 	for (i = 0; i < ndrv; i++)
-		seq_printf(seq, "%*s|", 8, drvs[i]);
-	seq_puts(seq, "\n");
+		seq_buf_printf(seq, "%*s|", 8, drvs[i]);
+	seq_buf_printf(seq, "\n");
 
 	for (i = 0; i < log->loglines; i++) {
 		data = &log->data[i];
-		seq_printf(seq, "%*x|", 9, data->ts);
+		seq_buf_printf(seq, "%*x|", 9, data->ts);
 		/* An all-zero line indicates we entered LPM */
 		for (j = 0, prev = data->drv_vx[0]; j < ndrv; j++)
 			prev |= data->drv_vx[j];
 		if (!prev) {
 			if (!from_exit) {
-				seq_printf(seq, "%s Enter\n", MODE_STR(hdr->mode.type));
+				seq_buf_printf(seq, "%s Enter\n", MODE_STR(hdr->mode.type));
 				from_exit = true;
 			} else {
-				seq_printf(seq, "%s Exit\n", MODE_STR(hdr->mode.type));
+				seq_buf_printf(seq, "%s Exit\n", MODE_STR(hdr->mode.type));
 				from_exit = false;
 			}
 			continue;
 		}
 		for (j = 0; j < ndrv; j++)
-			seq_printf(seq, "%*u|", 8, data->drv_vx[j]);
-		seq_puts(seq, "\n");
+			seq_buf_printf(seq, "%*u|", 8, data->drv_vx[j]);
+		seq_buf_printf(seq, "\n");
 	}
 }
 
-static int vx_show(struct seq_file *seq, void *data)
+static int vx_render(struct vx_platform_data *pd, struct seq_buf *seq)
 {
-	struct vx_platform_data *pd = seq->private;
 	struct vx_log log;
 	int ret;
 	int i;
@@ -497,6 +506,52 @@ static int vx_show(struct seq_file *seq, void *data)
 
 	return 0;
 }
+
+static int vx_show(struct seq_file *seq, void *data)
+{
+	struct seq_buf s;
+	char *buf;
+	int ret;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	seq_buf_init(&s, buf, PAGE_SIZE);
+	ret = vx_render(seq->private, &s);
+	if (!ret)
+		seq_write(seq, buf, seq_buf_used(&s));
+
+	kfree(buf);
+
+	return ret;
+}
+
+/*
+ * How often each DRV was found blocking power collapse since boot, followed
+ * by the current AOP log, readable on builds that do not mount debugfs.
+ */
+static ssize_t sys_pm_violators_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct vx_platform_data *pd = dev_get_drvdata(dev);
+	struct seq_buf s;
+	int i, ret;
+
+	seq_buf_init(&s, buf, PAGE_SIZE);
+
+	seq_buf_printf(&s, "Blocked power collapse:\n");
+	for (i = 0; i < pd->n_cxpc_drv; i++)
+		seq_buf_printf(&s, "%-12s %u\n", pd->cxpc_drvs[i], pd->blocked[i]);
+	seq_buf_printf(&s, "\n");
+
+	ret = vx_render(pd, &s);
+	if (ret)
+		seq_buf_printf(&s, "Log unavailable: %d\n", ret);
+
+	return seq_buf_used(&s);
+}
+static DEVICE_ATTR_RO(sys_pm_violators);
 
 static int open_vx(struct inode *inode, struct file *file)
 {
@@ -563,6 +618,8 @@ static void vx_create_debug_nodes(struct dentry *root, struct vx_platform_data *
 }
 
 static const struct of_device_id drv_match_table[] = {
+	{ .compatible = "qcom,sys-pm-cape",
+	  .data = drv_names_cape },
 	{ .compatible = "qcom,sys-pm-kalama",
 	  .data = drv_names_kalama },
 	{ .compatible = "qcom,sys-pm-pineapple",
@@ -640,6 +697,12 @@ static int vx_probe(struct platform_device *pdev)
 		goto fail_create_set_timer;
 	}
 
+	ret = device_create_file(&pdev->dev, &dev_attr_sys_pm_violators);
+	if (ret) {
+		dev_err(&pdev->dev, "failed: create sys pm vx sysfs violators entry\n");
+		goto fail_create_violators;
+	}
+
 	pd->qmp = qmp_get(&pdev->dev);
 	if (IS_ERR(pd->qmp)) {
 		ret = PTR_ERR(pd->qmp);
@@ -658,6 +721,8 @@ static int vx_probe(struct platform_device *pdev)
 	return 0;
 
 fail_get_qmp:
+	device_remove_file(&pdev->dev, &dev_attr_sys_pm_violators);
+fail_create_violators:
 	device_remove_file(&pdev->dev, &dev_attr_set_timer_ms);
 fail_create_set_timer:
 	device_remove_file(&pdev->dev, &dev_attr_debug_enable);
@@ -676,6 +741,7 @@ static int vx_remove(struct platform_device *pdev)
 	device_remove_file(&pdev->dev, &dev_attr_debug_time_ms);
 	device_remove_file(&pdev->dev, &dev_attr_debug_enable);
 	device_remove_file(&pdev->dev, &dev_attr_set_timer_ms);
+	device_remove_file(&pdev->dev, &dev_attr_sys_pm_violators);
 	qmp_put(pd->qmp);
 	subsystem_sleep_debug_enable(false);
 
