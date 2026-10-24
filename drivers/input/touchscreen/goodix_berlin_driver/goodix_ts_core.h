@@ -55,6 +55,7 @@
 
 #define GOODIX_NORMAL_RESET_DELAY_MS	100
 #define GOODIX_HOLD_CPU_RESET_DELAY_MS  5
+#define GOODIX_BUS_AWAKE_TIMEOUT_MS	1000
 
 #define GOODIX_RETRY_3					3
 #define GOODIX_RETRY_5					5
@@ -525,6 +526,8 @@ struct goodix_ts_core {
 
 	atomic_t irq_enabled;
 	atomic_t suspended;
+	/* done while the system is awake, so the bus can be used */
+	struct completion bus_awake;
 	/* when this flag is true, driver should not clean the sync flag */
 	bool tools_ctrl_sync;
 

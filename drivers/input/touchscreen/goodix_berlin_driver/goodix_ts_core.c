@@ -1614,6 +1614,25 @@ static void goodix_wakeup_held(struct goodix_ts_core *ts_data, bool lock)
 	}
 }
 
+/*
+ * An interrupt that arrives while the system suspends must not touch the
+ * bus, whose controller may already be asleep. Abort the suspend and wait
+ * until the system is back up before the bus is used.
+ */
+static bool goodix_ts_wait_bus_awake(struct goodix_ts_core *core_data)
+{
+	if (completion_done(&core_data->bus_awake))
+		return true;
+
+	pm_wakeup_dev_event(&core_data->input_dev->dev, 0, true);
+	if (wait_for_completion_timeout(&core_data->bus_awake,
+			msecs_to_jiffies(GOODIX_BUS_AWAKE_TIMEOUT_MS)))
+		return true;
+
+	ts_err("system did not resume, drop the interrupt");
+	return false;
+}
+
 /**
  * goodix_ts_threadirq_func - Bottom half of interrupt
  * This functions is excuted in thread context,
@@ -1633,6 +1652,10 @@ static irqreturn_t goodix_ts_threadirq_func(int irq, void *data)
 
 
 	goodix_wakeup_held(core_data, true);
+	if (!goodix_ts_wait_bus_awake(core_data)) {
+		goodix_wakeup_held(core_data, false);
+		return IRQ_HANDLED;
+	}
 	ts_esd->irq_status = true;
 	core_data->irq_trig_cnt++;
 	/* inform external module */
@@ -2381,32 +2404,35 @@ int goodix_ts_fb_notifier_callback(struct notifier_block *self,
 }
 #endif
 
-#if 0
-#if !IS_ENABLED(CONFIG_FB) && !IS_ENABLED(CONFIG_HAS_EARLYSUSPEND)
 /**
  * goodix_ts_pm_suspend - PM suspend function
- * Called by kernel during system suspend phrase
+ * Called by kernel during system suspend phrase. Display power is
+ * handled by the panel notifier; this only keeps the interrupt handler
+ * off the bus until the system is awake again.
  */
 static int goodix_ts_pm_suspend(struct device *dev)
 {
-	struct goodix_ts_core *core_data =
-		dev_get_drvdata(dev);
+	struct goodix_ts_core *core_data = dev_get_drvdata(dev);
 
-	return goodix_ts_suspend(core_data);
+	reinit_completion(&core_data->bus_awake);
+	if (core_data->irq > 0)
+		synchronize_irq(core_data->irq);
+
+	return 0;
 }
+
 /**
  * goodix_ts_pm_resume - PM resume function
  * Called by kernel during system wakeup
  */
 static int goodix_ts_pm_resume(struct device *dev)
 {
-	struct goodix_ts_core *core_data =
-		dev_get_drvdata(dev);
+	struct goodix_ts_core *core_data = dev_get_drvdata(dev);
 
-	return goodix_ts_resume(core_data);
+	complete_all(&core_data->bus_awake);
+
+	return 0;
 }
-#endif
-#endif
 
 /**
  * goodix_generic_noti_callback - generic notifier callback
@@ -2825,6 +2851,9 @@ static int goodix_ts_probe(struct platform_device *pdev)
 	core_data->bus = bus_interface;
 	platform_set_drvdata(pdev, core_data);
 
+	init_completion(&core_data->bus_awake);
+	complete_all(&core_data->bus_awake);
+
 	/* get GPIO resource */
 	ret = goodix_ts_gpio_setup(core_data);
 	if (ret) {
@@ -2854,6 +2883,10 @@ static int goodix_ts_probe(struct platform_device *pdev)
 
 	/* goodix fb test */
 	// fb_firefly_register(test_suspend, test_resume);
+
+	/* suspend before the bus device and resume after it */
+	if (!device_link_add(&pdev->dev, bus_interface->dev, DL_FLAG_STATELESS))
+		ts_err("failed link to the bus device, suspend order not ensured");
 
 	core_data->init_stage = CORE_INIT_STAGE1;
 	goodix_modules.core_data = core_data;
@@ -2916,18 +2949,13 @@ static int goodix_ts_remove(struct platform_device *pdev)
 	}
 
 	goodix_charger_proc_exit(core_data);
+	device_link_remove(&pdev->dev, core_data->bus->dev);
 
 	return 0;
 }
 
-#if 0
-static const struct dev_pm_ops dev_pm_ops = {
-#if !IS_ENABLED(CONFIG_FB) && !IS_ENABLED(CONFIG_HAS_EARLYSUSPEND)
-	.suspend = goodix_ts_pm_suspend,
-	.resume = goodix_ts_pm_resume,
-#endif
-};
-#endif
+static DEFINE_SIMPLE_DEV_PM_OPS(dev_pm_ops,
+		goodix_ts_pm_suspend, goodix_ts_pm_resume);
 
 static const struct platform_device_id ts_core_ids[] = {
 	{.name = GOODIX_CORE_DRIVER_NAME},
@@ -2939,9 +2967,7 @@ static struct platform_driver goodix_ts_driver = {
 	.driver = {
 		.name = GOODIX_CORE_DRIVER_NAME,
 		.owner = THIS_MODULE,
-#if 0
-		.pm = &dev_pm_ops,
-#endif
+		.pm = pm_sleep_ptr(&dev_pm_ops),
 	},
 	.probe = goodix_ts_probe,
 	.remove = goodix_ts_remove,
