@@ -265,8 +265,9 @@ static ssize_t proc_shell_write(struct file *filp, const char __user *buf,
 		return count;
 	}
 
+	/* sltntc also reports a board temperature that has no shell here */
 	if (index >= SHELL_MAX) {
-		pr_err("write invalid para\n");
+		pr_debug("ignore shell %u\n", index);
 		return count;
 	}
 
