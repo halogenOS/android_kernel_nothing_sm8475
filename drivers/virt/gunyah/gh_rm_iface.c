@@ -444,6 +444,10 @@ int gh_rm_get_this_vmid(gh_vmid_t *vmid)
 		return 0;
 	}
 
+	/* Hypervisors without a resource manager leave every caller on its default VMID */
+	if (!rm)
+		return -ENODEV;
+
 	ret = gh_rm_call(rm, GH_RM_RPC_MSG_ID_CALL_VM_GET_VMID, NULL, 0,
 			(void **)&resp, &resp_size);
 
