@@ -380,10 +380,8 @@ static int sensors_ssc_probe(struct platform_device *pdev)
 	}
 	rproc_phandle = be32_to_cpup(prop->value);
 	slpi = rproc_get_by_phandle(rproc_phandle);
-	if (!slpi) {
-		dev_err(&pdev->dev, "fail to get rproc\n", __func__);
-		return -EPROBE_DEFER;
-	}
+	if (!slpi)
+		return dev_err_probe(&pdev->dev, -EPROBE_DEFER, "fail to get rproc\n");
 
 	ret = slpi_loader_init_sysfs(pdev);
 
