@@ -629,7 +629,7 @@ static int brl_send_config(struct goodix_ts_core *cd, u8 *cfg, int len)
 	}
 
 	if (len < cfg_head_len) {
-		ts_err("config buffer size %d smaller than header size %d",
+		ts_err("config buffer size %d smaller than header size %zu",
 			len, sizeof(*cfg_head));
 		return -EINVAL;
 	}

@@ -87,7 +87,7 @@ static void goodix_register_for_panel_events(struct device_node *dp,
 		return;
 	}
 
-	ts_info("registered for panel notifications panel: 0x%x\n",
+	ts_info("registered for panel notifications panel: %p\n",
 			active_panel);
 
 	cd->notifier_cookie = cookie;
