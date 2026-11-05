@@ -6088,7 +6088,7 @@ static ssize_t manual_gc_hold_store(struct device *dev,
 
 	if (value < UFSHCD_MANUAL_GC_HOLD_HIBERN8_MIN ||
 		value > UFSHCD_MANUAL_GC_HOLD_HIBERN8_MAX) {
-		dev_err(dev, "%s Invaild value: %d\n", __func__, value);
+		dev_err(dev, "%s Invaild value: %lu\n", __func__, value);
 		return -EINVAL;
 	}
 	host->manual_gc.delay_ms = value;
